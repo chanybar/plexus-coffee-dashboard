@@ -1,1127 +1,778 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Plexus Coffee Outreach Dashboard</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Plexus Coffee Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
-  theme: {
-    extend: {
-      colors: {
-        cream: '#FAF6F1',
-        sand: '#F0E6D3',
-        sandDark: '#E2D1B8',
-        espresso: '#2C1810',
-        espressoLight: '#4A2C1A',
-        brown: '#6B3D2E',
-        caramel: '#C17F3B',
-        gold: '#D4A843',
-        olive: '#5C6E2E',
-        oliveLight: '#7A8F45',
-        roast: '#8B4513',
-      },
-      fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-      },
-      boxShadow: {
-        warm: '0 2px 12px rgba(44,24,16,0.08)',
-        card: '0 1px 4px rgba(44,24,16,0.06), 0 4px 16px rgba(44,24,16,0.06)',
-      }
+  theme: { extend: {
+    colors: {
+      cream:'#FAF6F1', sand:'#F0E6D3', sandDark:'#E2D1B8',
+      espresso:'#2C1810', espressoLight:'#4A2C1A', brown:'#6B3D2E',
+      caramel:'#C17F3B', olive:'#5C6E2E'
     }
-  }
+  }}
 }
 </script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Inter', sans-serif; background: #FAF6F1; }
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: #F0E6D3; }
-  ::-webkit-scrollbar-thumb { background: #C17F3B; border-radius: 3px; }
-  .grade-0 { background:#FEE2E2; color:#B91C1C; border:1px solid #FECACA; }
-  .grade-1 { background:#FEF3C7; color:#B45309; border:1px solid #FDE68A; }
-  .grade-2 { background:#FFF7ED; color:#C2410C; border:1px solid #FED7AA; }
-  .grade-3 { background:#DCFCE7; color:#15803D; border:1px solid #BBF7D0; }
-  .nav-active { background: rgba(193,127,59,0.12); color: #C17F3B; }
-  .nav-item { transition: all 0.15s; }
-  .nav-item:hover { background: rgba(193,127,59,0.08); }
-  .btn-grade { transition: all 0.15s; cursor: pointer; }
-  .btn-grade:hover { transform: scale(1.05); }
-  .btn-grade.selected { transform: scale(1.08); box-shadow: 0 0 0 2px currentColor; }
-  input, textarea, select { outline: none; }
-  input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 2px rgba(193,127,59,0.35); }
-  .fade-in { animation: fadeIn 0.2s ease; }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
-  .coffee-ring { width:8px; height:8px; border-radius:50%; display:inline-block; }
+* { box-sizing:border-box; }
+body { margin:0; font-family:'Inter',sans-serif; background:#FAF6F1; }
+::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:#F0E6D3} ::-webkit-scrollbar-thumb{background:#C17F3B;border-radius:3px}
+.fade-in{animation:fadeIn .25s ease} @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.leaflet-container{border-radius:12px}
 </style>
 </head>
 <body>
 <div id="root"></div>
-
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
-// ── Pure-SVG Chart Components (no external library) ───────────────────
-function SVGBarChart({ data, valueKey='count', labelKey='name', colorKey=null, defaultColor='#C17F3B', height=200, multiKeys=null, multiColors=['#C17F3B','#6B3D2E'], multiLabels=[] }) {
-  const PL=44,PR=12,PT=12,PB=38,W=500;
-  const H=height, IW=W-PL-PR, IH=H-PT-PB;
-  const maxVal = multiKeys
-    ? Math.max(...data.map(d=>Math.max(...multiKeys.map(k=>d[k]||0))),1)
-    : Math.max(...data.map(d=>d[valueKey]||0),1);
-  const gap=IW/Math.max(data.length,1);
-  const bw = multiKeys ? gap*0.35 : gap*0.55;
-  const ticks=[0,0.25,0.5,0.75,1];
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:height}}>
-      {ticks.map((f,i)=>{const y=PT+IH*(1-f);return(<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#F0E6D3" strokeWidth="1"/><text x={PL-5} y={y+4} textAnchor="end" fontSize="10" fill="#6B3D2E">{Math.round(maxVal*f)}</text></g>);})}
-      <line x1={PL} y1={PT+IH} x2={W-PR} y2={PT+IH} stroke="#E2D1B8" strokeWidth="1.5"/>
-      {data.map((d,i)=>{
-        const cx=PL+gap*i+gap/2;
-        if(multiKeys){return(<g key={i}>{multiKeys.map((k,ki)=>{const val=d[k]||0;const bH=(val/maxVal)*IH;const x=cx-bw+(ki*(bw+3));return(<g key={ki}><rect x={x} y={PT+IH-bH} width={bw} height={Math.max(bH,0)} fill={multiColors[ki]} rx="3"/>{val>0&&<text x={x+bw/2} y={PT+IH-bH-3} textAnchor="middle" fontSize="9" fill={multiColors[ki]}>{val}</text>}</g>);})}<text x={cx} y={PT+IH+16} textAnchor="middle" fontSize="10" fill="#6B3D2E">{d[labelKey]}</text></g>);}
-        const val=d[valueKey]||0;const bH=(val/maxVal)*IH;const col=colorKey?d[colorKey]:defaultColor;
-        return(<g key={i}><rect x={cx-bw/2} y={PT+IH-bH} width={bw} height={Math.max(bH,0)} fill={col} rx="4"/>{val>0&&<text x={cx} y={PT+IH-bH-4} textAnchor="middle" fontSize="11" fontWeight="600" fill={col}>{val}</text>}<text x={cx} y={PT+IH+16} textAnchor="middle" fontSize="10" fill="#6B3D2E">{d[labelKey]}</text></g>);
-      })}
-      {multiKeys&&multiLabels.length>0&&<g>{multiLabels.map((lbl,i)=><g key={i}><rect x={PL+i*90} y={H-8} width={10} height={10} fill={multiColors[i]} rx="2"/><text x={PL+i*90+14} y={H-1} fontSize="10" fill="#6B3D2E">{lbl}</text></g>)}</g>}
-    </svg>
-  );
-}
+// ── localStorage helpers ──────────────────────────────────────────────
+function loadLS(key, fb) { try { const v=localStorage.getItem(key); return v?JSON.parse(v):fb; } catch(e){return fb;} }
+function saveLS(key, v) { try { localStorage.setItem(key,JSON.stringify(v)); } catch(e){} }
 
-function SVGHBarChart({ data, valueKey='avg', labelKey='name', maxVal=3, height=220, color='#C17F3B' }) {
-  const PL=138,PR=48,PT=6,PB=6,W=500;
-  const n=data.length,rowH=Math.min(30,Math.max(20,(height-PT-PB)/Math.max(n,1)));
-  const H=PT+PB+n*rowH,IW=W-PL-PR;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:Math.max(height,H)}}>
-      {data.map((d,i)=>{const val=Math.max(d[valueKey]||0,0);const bW=(val/maxVal)*IW;const y=PT+i*rowH;return(<g key={i}><text x={PL-6} y={y+rowH/2+4} textAnchor="end" fontSize="11" fill="#2C1810" style={{fontWeight:500}}>{d[labelKey]}</text><rect x={PL} y={y+4} width={IW} height={rowH-8} fill="#F0E6D3" rx="4"/><rect x={PL} y={y+4} width={bW} height={rowH-8} fill={color} rx="4"/><text x={PL+bW+5} y={y+rowH/2+4} fontSize="11" fill="#6B3D2E" fontWeight="600">{val}</text></g>);})}
-    </svg>
-  );
-}
-
-function SVGLineChart({ data, valueKey='avg', labelKey='name', maxVal=3, height=200, color='#C17F3B' }) {
-  const PL=40,PR=12,PT=12,PB=36,W=500;
-  const H=height,IW=W-PL-PR,IH=H-PT-PB,n=data.length;
-  const dMax=maxVal||Math.max(...data.map(d=>d[valueKey]||0),1);
-  const step=n>1?IW/(n-1):IW/2;
-  const pts=data.map((d,i)=>[PL+(n>1?i*step:IW/2),PT+IH*(1-(d[valueKey]||0)/dMax)]);
-  const poly=pts.map(p=>p.join(',')).join(' ');
-  const gridVals=[...Array(Math.ceil(dMax)+1)].map((_,i)=>i).filter(v=>v<=dMax);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:height}}>
-      {gridVals.map(v=>{const y=PT+IH*(1-v/dMax);return(<g key={v}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#F0E6D3" strokeWidth="1"/><text x={PL-5} y={y+4} textAnchor="end" fontSize="10" fill="#6B3D2E">{v}</text></g>);})}
-      <line x1={PL} y1={PT+IH} x2={W-PR} y2={PT+IH} stroke="#E2D1B8" strokeWidth="1.5"/>
-      {n>1&&<polyline points={poly} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>}
-      {pts.map(([x,y],i)=>(
-        <g key={i}>
-          <circle cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2"/>
-          <text x={x} y={PT+IH+16} textAnchor="middle" fontSize="10" fill="#6B3D2E">{data[i][labelKey]}</text>
-          <text x={x} y={y-9} textAnchor="middle" fontSize="10" fill={color} fontWeight="700">{data[i][valueKey]}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function SVGDonut({ data, colors=['#C17F3B','#6B3D2E'], size=200 }) {
-  const total=data.reduce((a,d)=>a+d.value,0)||1;
-  const cx=size/2,cy=size/2,R=size*0.37,r=size*0.22;
-  let ang=-Math.PI/2;
-  const slices=data.map((d,i)=>{
-    const sweep=(d.value/total)*2*Math.PI;
-    const x1=cx+R*Math.cos(ang),y1=cy+R*Math.sin(ang);
-    ang+=sweep;
-    const x2=cx+R*Math.cos(ang),y2=cy+R*Math.sin(ang);
-    const xi1=cx+r*Math.cos(ang-sweep),yi1=cy+r*Math.sin(ang-sweep);
-    const xi2=cx+r*Math.cos(ang),yi2=cy+r*Math.sin(ang);
-    const lg=sweep>Math.PI?1:0;
-    const path=`M${x1},${y1} A${R},${R},0,${lg},1,${x2},${y2} L${xi2},${yi2} A${r},${r},0,${lg},0,${xi1},${yi1} Z`;
-    const mid=ang-sweep/2;
-    return {path,color:colors[i],label:d.name,value:d.value,mx:cx+(R+22)*Math.cos(mid),my:cy+(R+22)*Math.sin(mid),pct:Math.round(d.value/total*100)};
-  });
-  return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{width:'100%',height:size}}>
-      {slices.map((s,i)=>(<g key={i}><path d={s.path} fill={s.color}/><text x={s.mx} y={s.my-5} textAnchor="middle" fontSize="10" fill={s.color} fontWeight="600">{s.label}</text><text x={s.mx} y={s.my+8} textAnchor="middle" fontSize="10" fill={s.color}>{s.value} ({s.pct}%)</text></g>))}
-      <text x={cx} y={cy-5} textAnchor="middle" fontSize="15" fill="#2C1810" fontWeight="700">{total}</text>
-      <text x={cx} y={cy+12} textAnchor="middle" fontSize="10" fill="#6B3D2E">Total Bags</text>
-    </svg>
-  );
-}
-
-// ============================================================
-// SEED DATA — extracted from PDF chat logs (Feb 27 – Apr 6, 2026)
-// ============================================================
-const INIT_ROUTES = [
-  { id:'r1',  date:'2026-02-27', name:'Scottsdale Architecture Overflow',       rep:'Chandler White', area:'Scottsdale + Phoenix',         focus:'Architecture / Design' },
-  { id:'r2',  date:'2026-03-04', name:'Mesa Architecture + Construction',        rep:'Chandler White', area:'East / South Mesa',            focus:'Architecture / Construction' },
-  { id:'r3',  date:'2026-03-06', name:'Phoenix Law Firms — Day 1',               rep:'Chandler White', area:'Phoenix Downtown',              focus:'Law' },
-  { id:'r4',  date:'2026-03-09', name:'Phoenix Law Firms — Day 2',               rep:'Chandler White', area:'Phoenix Downtown',              focus:'Law' },
-  { id:'r5',  date:'2026-03-11', name:'BHHS Legacy Drop + Law Firms',            rep:'Chandler White', area:'Phoenix + Midtown',             focus:'Law' },
-  { id:'r6',  date:'2026-03-13', name:'Biltmore Law Run',                        rep:'Chandler White', area:'Central Ave → Biltmore',        focus:'Law' },
-  { id:'r7',  date:'2026-03-23', name:'Phoenix Architecture + Construction',     rep:'Chandler White', area:'Phoenix Central + Midtown',     focus:'Architecture / Construction / Law' },
-  { id:'r8',  date:'2026-03-25', name:'Law + Arch + Construction Mix',           rep:'Chandler White', area:'N 16th St + Biltmore + South',  focus:'Law / Architecture / Construction' },
-  { id:'r9',  date:'2026-04-01', name:'Phoenix Law + Arch + Construction',       rep:'Chandler White', area:'Osborn + Central + East',       focus:'Law / Architecture / Construction' },
-  { id:'r10', date:'2026-04-06', name:'Mesa + Chandler — Mixed Industries',      rep:'Chandler White', area:'Mesa + Chandler AZ',            focus:'Law / Biotech / Nonprofit / Construction' },
-];
-
+// ── Seed data: all stops with lat/lng for map ─────────────────────────
 const INIT_STOPS = [
-  // ── ROUTE 1 ─ 2026-02-27 ──
-  { id:'s1-1',  route_id:'r1', route_date:'2026-02-27', stop_number:15, company_name:'DPA Architects',              category:'Architecture', address:'3719 N 75th St Suite 105, Scottsdale AZ 85251',             contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Real building. Followed on LinkedIn.' },
-  { id:'s1-2',  route_id:'r1', route_date:'2026-02-27', stop_number:16, company_name:'Candelaria Design Associates', category:'Architecture', address:'6900 E Camelback Rd #400, Scottsdale AZ 85251',             contact_name:'',             contact_title:'',                    phone:'(602) 604-2001', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Located inside Camelback Tower. LinkedIn followed.' },
-  { id:'s1-3',  route_id:'r1', route_date:'2026-02-27', stop_number:17, company_name:'Devenney Group',               category:'Architecture', address:'6900 E Camelback Rd Ste 500, Scottsdale AZ 85251',          contact_name:'Stephen Stack', contact_title:'',                    phone:'(602) 943-8950', rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same building as Camelback Tower. Friendly. LinkedIn → Stephen Stack.' },
-  { id:'s1-4',  route_id:'r1', route_date:'2026-02-27', stop_number:18, company_name:'Drewett Works',                category:'Architecture', address:'7144 E Stetson Dr Ste 204, Scottsdale AZ 85251',            contact_name:'',             contact_title:'',                    phone:'(855) 373-9388', rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:true,  fu_status:'contacted',   valid:true,  repeat:false, card:false, notes:'Wanted more info about IT — was heading out. Busy office! Can get more info later today.' },
-  { id:'s1-5',  route_id:'r1', route_date:'2026-02-27', stop_number:19, company_name:'Butler Design Group',          category:'Architecture', address:'5013 E Washington St Ste 100, Phoenix AZ 85034',            contact_name:'',             contact_title:'',                    phone:'(602) 957-1800', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Followed on LinkedIn.' },
-  { id:'s1-6',  route_id:'r1', route_date:'2026-02-27', stop_number:20, company_name:'Archicon Architecture',        category:'Architecture', address:'5055 E Washington St Ste 200, Phoenix AZ 85034',            contact_name:'',             contact_title:'',                    phone:'(602) 222-4266', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 6pm. HQ seems to be in TX.' },
-  { id:'s1-7',  route_id:'r1', route_date:'2026-02-27', stop_number:21, company_name:'CCBG Architects',              category:'Architecture', address:'102 E Buchanan St, Phoenix AZ 85004',                       contact_name:'',             contact_title:'',                    phone:'(602) 258-2211', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 11:30 Friday. Hit this one first.' },
-  { id:'s1-8',  route_id:'r1', route_date:'2026-02-27', stop_number:22, company_name:'DWL Architects + Planners',    category:'Architecture', address:'2333 N Central Ave, Phoenix AZ 85004',                      contact_name:'',             contact_title:'',                    phone:'(602) 264-9731', rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 4pm Friday. Good reception.' },
-  { id:'s1-9',  route_id:'r1', route_date:'2026-02-27', stop_number:23, company_name:'SWABACK',                      category:'Architecture', address:'7550 E McDonald Dr Ste A, Scottsdale AZ 85250',             contact_name:'',             contact_title:'',                    phone:'(480) 367-2100', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 5.' },
-  { id:'s1-10', route_id:'r1', route_date:'2026-02-27', stop_number:24, company_name:'PHX Architecture',             category:'Architecture', address:'15990 N Greenway-Hayden Loop Ste C-100, Scottsdale AZ 85260',contact_name:'',             contact_title:'',                    phone:'(480) 477-1111', rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 5 Friday.' },
-  { id:'s1-11', route_id:'r1', route_date:'2026-02-27', stop_number:25, company_name:'Stewart + Reindersma',         category:'Architecture', address:'8145 E Indian Bend Rd, Scottsdale AZ 85250',                contact_name:'',             contact_title:'',                    phone:'(480) 515-5123', rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Open till 5 Friday. Good vibe.' },
-  // ── ROUTE 2 ─ 2026-03-04 ──
-  { id:'s2-1',  route_id:'r2', route_date:'2026-03-04', stop_number:2,  company_name:'Home Address (Invalid)',        category:'Invalid',      address:'Mesa AZ',                                                  contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:0, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:false, repeat:false, card:false, notes:'Home address used for business registration. Skipped per Scott.' },
-  { id:'s2-2',  route_id:'r2', route_date:'2026-03-04', stop_number:3,  company_name:'J4 Architecture and Design',   category:'Architecture', address:'1839 S Alma School Rd Ste 285, Mesa AZ 85210',              contact_name:'',             contact_title:'',                    phone:'(602) 515-6924', rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Office park. Scott confirmed not a home.' },
-  // ── ROUTE 3 ─ 2026-03-06 ──
-  { id:'s3-1',  route_id:'r3', route_date:'2026-03-06', stop_number:1,  company_name:'BHHS Legacy',                  category:'Real Estate',  address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:true,  card:false, notes:'Repeat drop — had meeting this week. Coffee as appreciation, no agenda.' },
-  { id:'s3-2',  route_id:'r3', route_date:'2026-03-06', stop_number:2,  company_name:'Phoenix Law Firm (MSP Prospect)',category:'Law',         address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'waiting',     valid:true,  repeat:false, card:false, notes:'Currently looking for a new MSP! Receptionist confirmed they are actively searching. Did not speak with DM.' },
-  { id:'s3-3',  route_id:'r3', route_date:'2026-03-06', stop_number:3,  company_name:'Phoenix Law Firm B',           category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'They know who we were. Strong interest.' },
-  // ── ROUTE 4 ─ 2026-03-09 ──
-  { id:'s4-1',  route_id:'r4', route_date:'2026-03-09', stop_number:1,  company_name:'Ballard Spahr',                category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-2',  route_id:'r4', route_date:'2026-03-09', stop_number:2,  company_name:'Gust Rosenfeld P.L.C.',         category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-3',  route_id:'r4', route_date:'2026-03-09', stop_number:3,  company_name:'Jones, Skelton & Hochuli, P.L.C.',category:'Law',         address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Super sweet lady! Was intrigued by what we do.' },
-  { id:'s4-4',  route_id:'r4', route_date:'2026-03-09', stop_number:4,  company_name:'Tiffany & Bosco',              category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-5',  route_id:'r4', route_date:'2026-03-09', stop_number:5,  company_name:'Burch & Cracchiolo',           category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-6',  route_id:'r4', route_date:'2026-03-09', stop_number:6,  company_name:'Frazer Ryan Goldberg & Arnold', category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-7',  route_id:'r4', route_date:'2026-03-09', stop_number:7,  company_name:'Greater Phoenix Chamber',      category:'Chamber / Org',address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-8',  route_id:'r4', route_date:'2026-03-09', stop_number:8,  company_name:'Ogletree',                     category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-9',  route_id:'r4', route_date:'2026-03-09', stop_number:9,  company_name:'Littler Mendelson P.C.',        category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s4-10', route_id:'r4', route_date:'2026-03-09', stop_number:10, company_name:'Greater Phoenix Chamber (2nd)', category:'Chamber / Org',address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  // ── ROUTE 5 ─ 2026-03-11 ─ ALL 3s day! ──
-  { id:'s5-1',  route_id:'r5', route_date:'2026-03-11', stop_number:1,  company_name:'BHHS Legacy (2nd Drop)',        category:'Real Estate',  address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:1, gc:0, follow_up:true,  fu_status:'waiting',     valid:true,  repeat:true,  card:false, notes:'Repeat coffee drop. Very warm reception.' },
-  { id:'s5-2',  route_id:'r5', route_date:'2026-03-11', stop_number:2,  company_name:'Gammage & Burnham',            category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Went off beaten path. Very engaged.' },
-  { id:'s5-3',  route_id:'r5', route_date:'2026-03-11', stop_number:3,  company_name:'Holden Willits PLC',           category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Very nice.' },
-  { id:'s5-4',  route_id:'r5', route_date:'2026-03-11', stop_number:4,  company_name:'Womble Bond Dickinson',        category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-5',  route_id:'r5', route_date:'2026-03-11', stop_number:5,  company_name:'Spencer Fane',                 category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-6',  route_id:'r5', route_date:'2026-03-11', stop_number:6,  company_name:'Husch Blackwell',              category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-7',  route_id:'r5', route_date:'2026-03-11', stop_number:7,  company_name:'Cavanagh Law',                 category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-8',  route_id:'r5', route_date:'2026-03-11', stop_number:8,  company_name:'Jaburg Wilk',                  category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-9',  route_id:'r5', route_date:'2026-03-11', stop_number:9,  company_name:'Clark Hill',                   category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s5-10', route_id:'r5', route_date:'2026-03-11', stop_number:10, company_name:'Fisher Phillips',              category:'Law',          address:'Phoenix AZ',                                               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  // ── ROUTE 6 ─ 2026-03-13 ──
-  { id:'s6-1',  route_id:'r6', route_date:'2026-03-13', stop_number:2,  company_name:'Wilenchik & Bartness PC',       category:'Law',          address:'2810 N 3rd St, Phoenix AZ 85004',                          contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s6-2',  route_id:'r6', route_date:'2026-03-13', stop_number:3,  company_name:'Stinson LLP',                  category:'Law',          address:'1850 N Central Ave Ste 2100, Phoenix AZ 85004',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same-building back-to-back with Dickinson Wright.' },
-  { id:'s6-3',  route_id:'r6', route_date:'2026-03-13', stop_number:4,  company_name:'Dickinson Wright PLLC',         category:'Law',          address:'1850 N Central Ave Ste 1400, Phoenix AZ 85004',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same building as Stinson LLP.' },
-  { id:'s6-4',  route_id:'r6', route_date:'2026-03-13', stop_number:5,  company_name:'Jackson Lewis P.C.',           category:'Law',          address:'2111 E Highland Ave Ste B-250, Phoenix AZ 85016',          contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s6-5',  route_id:'r6', route_date:'2026-03-13', stop_number:6,  company_name:'Baird Williams & Greer LLP',   category:'Law',          address:'6225 N 24th St Ste 125, Phoenix AZ 85016',                contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s6-6',  route_id:'r6', route_date:'2026-03-13', stop_number:7,  company_name:'Dentons — Phoenix',            category:'Law',          address:'2398 E Camelback Rd, Phoenix AZ 85016',                    contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same-building with Holland & Hart. Highly engaged.' },
-  { id:'s6-7',  route_id:'r6', route_date:'2026-03-13', stop_number:8,  company_name:'Holland & Hart LLP',           category:'Law',          address:'2398 E Camelback Rd Ste 650, Phoenix AZ 85016',           contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same building as Dentons.' },
-  { id:'s6-8',  route_id:'r6', route_date:'2026-03-13', stop_number:9,  company_name:'DLA Piper LLP (US)',           category:'Law',          address:'2525 E Camelback Rd Ste 1000, Phoenix AZ 85016',          contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s6-9',  route_id:'r6', route_date:'2026-03-13', stop_number:10, company_name:'Dorsey & Whitney LLP',         category:'Law',          address:'2325 E Camelback Rd Ste 300, Phoenix AZ 85016',           contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Optional add-on if time.' },
-  // ── ROUTE 7 ─ 2026-03-23 ──
-  { id:'s7-1',  route_id:'r7', route_date:'2026-03-23', stop_number:2,  company_name:'Bryan Cave Leighton Paisner',  category:'Law',          address:'2 N Central Ave Ste 2100, Phoenix AZ 85004',               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:"Didn't really quite care for the IT." },
-  { id:'s7-2',  route_id:'r7', route_date:'2026-03-23', stop_number:3,  company_name:'Gordon Rees Scully Mansukhani',category:'Law',          address:'2 N Central Ave Ste 2200, Phoenix AZ 85004',               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-3',  route_id:'r7', route_date:'2026-03-23', stop_number:4,  company_name:'Ridenour, Hienton & Lewis PLLC',category:'Law',         address:'201 N Central Ave Ste 3300, Phoenix AZ 85004',             contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-4',  route_id:'r7', route_date:'2026-03-23', stop_number:5,  company_name:'Mitchell Stein Carey',         category:'Law',          address:'Phoenix AZ 85004',                                         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Building not confirmed.' },
-  { id:'s7-5',  route_id:'r7', route_date:'2026-03-23', stop_number:6,  company_name:'Coppersmith Brockelman PLC',   category:'Law',          address:'2800 N Central Ave Ste 1900, Phoenix AZ 85004',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-6',  route_id:'r7', route_date:'2026-03-23', stop_number:7,  company_name:'Gensler Architecture',         category:'Architecture', address:'201 E Washington St, Phoenix AZ 85004',                    contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-7',  route_id:'r7', route_date:'2026-03-23', stop_number:8,  company_name:'SmithGroup Architecture',      category:'Architecture', address:'455 N 3rd St Ste 250, Phoenix AZ 85004',                   contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-8',  route_id:'r7', route_date:'2026-03-23', stop_number:9,  company_name:'HDR Architecture/Engineering', category:'Architecture', address:'20 E Thomas Rd Ste 2500, Phoenix AZ 85012',                contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-9',  route_id:'r7', route_date:'2026-03-23', stop_number:10, company_name:'DPR Construction',             category:'Construction', address:'222 N 44th St, Phoenix AZ 85034',                          contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s7-10', route_id:'r7', route_date:'2026-03-23', stop_number:11, company_name:'McCarthy Building Companies',  category:'Construction', address:'6225 N 24th St Ste 200, Phoenix AZ 85016',                 contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  // ── ROUTE 8 ─ 2026-03-25 ─ Most detailed day ──
-  { id:'s8-1',  route_id:'r8', route_date:'2026-03-25', stop_number:2,  company_name:'DeConcini McDonald Yetwin & Lacy',category:'Law',        address:'7310 N 16th St Ste 205, Phoenix AZ 85020',                 contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:0, gc:1, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Extremely nice! Asked about IT. No cards — interested but unclear who they were with.' },
-  { id:'s8-2',  route_id:'r8', route_date:'2026-03-25', stop_number:3,  company_name:'Sweet James Law (Unplanned)',   category:'Law',          address:'Phoenix AZ 85020',                                         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Went to school with his niece. Main office in CA. Gave whole bean.' },
-  { id:'s8-3',  route_id:'r8', route_date:'2026-03-25', stop_number:4,  company_name:'Parker Schwartz, PLLC',        category:'Law',          address:'7310 N 16th St Ste 330, Phoenix AZ 85020',                 contact_name:'Claudia King', contact_title:'Office Administrator',phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:true,  notes:'Super friendly! Card from Claudia King (Office Admin). Gave whole bean.' },
-  { id:'s8-4',  route_id:'r8', route_date:'2026-03-25', stop_number:5,  company_name:'Gillespie, Shields & Taylor',  category:'Law',          address:'7319 N 16th St, Phoenix AZ 85020',                         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:"Decent to talk to. Gave whole bean." },
-  { id:'s8-5',  route_id:'r8', route_date:'2026-03-25', stop_number:6,  company_name:'Jennings Haug Keleher McLeod Waterfall',category:'Law',  address:'2800 N Central Ave Ste 1800, Phoenix AZ 85004',            contact_name:'Office Admin', contact_title:'Office Administrator',phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'waiting',     valid:true,  repeat:false, card:true,  notes:'Secretary thought selling coffee, told them IT provider for law firms. Got card for office admin. High potential.' },
-  { id:'s8-6',  route_id:'r8', route_date:'2026-03-25', stop_number:7,  company_name:'DLR Group Architecture',       category:'Architecture', address:'6225 N 24th St Ste 250, Phoenix AZ 85016',                 contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:0, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:true,  card:false, notes:'Construction company owns entire building. Already gave coffee weeks ago. Repeat — skip.' },
-  { id:'s8-7',  route_id:'r8', route_date:'2026-03-25', stop_number:8,  company_name:'Layton Construction',          category:'Construction', address:'2355 E Camelback Rd Ste 800, Phoenix AZ 85016',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:"Already have in-house IT. Didn't care for the coffee or me." },
-  { id:'s8-8',  route_id:'r8', route_date:'2026-03-25', stop_number:9,  company_name:'Sundt Construction',           category:'Construction', address:'2905 S 18th Pl, Phoenix AZ 85034',                         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  // ── ROUTE 9 ─ 2026-04-01 ──
-  { id:'s9-1',  route_id:'r9', route_date:'2026-04-01', stop_number:2,  company_name:'Schmitt Schneck Even & Williams',category:'Law',         address:'1221 E Osborn Rd Ste 105, Phoenix AZ 85014',               contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:3, wb:1, gc:0, follow_up:true,  fu_status:'waiting',     valid:true,  repeat:false, card:false, notes:'Multiple office managers in same room — all have IT but want to talk when contracts expire. Love coffee + Christian angle. Sat through 20-min Q&A!' },
-  { id:'s9-2',  route_id:'r9', route_date:'2026-04-01', stop_number:3,  company_name:'Silver Cain',                  category:'Law',          address:'3101 N Central Ave Ste 1410, Phoenix AZ 85012',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s9-3',  route_id:'r9', route_date:'2026-04-01', stop_number:4,  company_name:'Keller Rohrback',              category:'Law',          address:'3101 N Central Ave Ste 1400, Phoenix AZ 85012',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Same building as Silver Cain.' },
-  { id:'s9-4',  route_id:'r9', route_date:'2026-04-01', stop_number:5,  company_name:'May Potenza Baran & Gillespie', category:'Law',          address:'1850 N Central Ave Ste 1600, Phoenix AZ 85004',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s9-5',  route_id:'r9', route_date:'2026-04-01', stop_number:6,  company_name:'Rusing Lopez & Lizardi',       category:'Law',          address:'2375 E Camelback Rd, Phoenix AZ 85016',                    contact_name:'Carroll',      contact_title:'Receptionist',        phone:'',               rep:'Chandler White', grade:3, wb:0, gc:0, follow_up:true,  fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'Spoke with receptionist Carroll — super engaged.' },
-  { id:'s9-6',  route_id:'r9', route_date:'2026-04-01', stop_number:7,  company_name:'HKS Architecture',             category:'Architecture', address:'821 N Central Ave, Phoenix AZ 85004',                      contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s9-7',  route_id:'r9', route_date:'2026-04-01', stop_number:8,  company_name:'Skanska Construction',         category:'Construction', address:'2800 N Central Ave Ste 1000, Phoenix AZ 85004',            contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s9-8',  route_id:'r9', route_date:'2026-04-01', stop_number:9,  company_name:'McGough Construction',         category:'Construction', address:'4720 E Cotton Gin Loop Ste 100, Phoenix AZ 85040',         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  // ── ROUTE 10 ─ 2026-04-06 ──
-  { id:'s10-1', route_id:'r10', route_date:'2026-04-06', stop_number:1, company_name:'Hough Law Offices, P.L.L.C.',  category:'Law',          address:'Mesa AZ',                                                  contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s10-2', route_id:'r10', route_date:'2026-04-06', stop_number:2, company_name:'JacksonWhite Law',             category:'Law',          address:'Mesa AZ',                                                  contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s10-3', route_id:'r10', route_date:'2026-04-06', stop_number:3, company_name:'Gunderson Denton & Peterson',  category:'Law',          address:'Mesa AZ',                                                  contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s10-4', route_id:'r10', route_date:'2026-04-06', stop_number:4, company_name:'MBS Biotechnology',            category:'Biotech',      address:'Mesa/Chandler AZ',                                         contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:2, wb:1, gc:0, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
-  { id:'s10-5', route_id:'r10', route_date:'2026-04-06', stop_number:5, company_name:'Gable Family Builders',        category:'Construction', address:'Chandler AZ',                                              contact_name:'',             contact_title:'',                    phone:'',               rep:'Chandler White', grade:1, wb:0, gc:1, follow_up:false, fu_status:'not_started', valid:true,  repeat:false, card:false, notes:'' },
+  // Route 1 — 2/27 Scottsdale Architecture
+  {id:'s1-1',  route_id:'r1', date:'2026-02-27', stop:1,  company:'Archicon Studio',              cat:'Architecture', lat:33.4882, lng:-111.9257, stars:1, wb:0, gc:0, notes:'Not interested.'},
+  {id:'s1-2',  route_id:'r1', date:'2026-02-27', stop:2,  company:'Butler Design Group',          cat:'Architecture', lat:33.4921, lng:-111.9198, stars:2, wb:1, gc:0, notes:'Nice reception, took coffee.'},
+  {id:'s1-3',  route_id:'r1', date:'2026-02-27', stop:3,  company:'Drewett Works',                cat:'Architecture', lat:33.4968, lng:-111.9143, stars:2, wb:1, gc:0, notes:'Asked about IT services — good lead.'},
+  {id:'s1-4',  route_id:'r1', date:'2026-02-27', stop:4,  company:'Swaback Partners',             cat:'Architecture', lat:33.4840, lng:-111.9312, stars:1, wb:0, gc:0, notes:'No decision maker available.'},
+  {id:'s1-5',  route_id:'r1', date:'2026-02-27', stop:5,  company:'Nelsen Partners',              cat:'Architecture', lat:33.5010, lng:-111.9174, stars:2, wb:1, gc:0, notes:'Friendly, will follow up.'},
+  {id:'s1-6',  route_id:'r1', date:'2026-02-27', stop:6,  company:'SmithGroup Scottsdale',        cat:'Architecture', lat:33.4801, lng:-111.9341, stars:1, wb:0, gc:0, notes:'Corporate — no entry.'},
+  {id:'s1-7',  route_id:'r1', date:'2026-02-27', stop:7,  company:'Venue Projects',               cat:'Architecture', lat:33.5052, lng:-111.9110, stars:2, wb:1, gc:0, notes:'Good conversation.'},
+
+  // Route 2 — 3/4 Mesa Architecture + Construction
+  {id:'s2-1',  route_id:'r2', date:'2026-03-04', stop:1,  company:'CCBG Architects',              cat:'Architecture', lat:33.4118, lng:-111.8342, stars:2, wb:1, gc:0, notes:'Receptionist loved the coffee.'},
+  {id:'s2-2',  route_id:'r2', date:'2026-03-04', stop:2,  company:'Architekton',                  cat:'Architecture', lat:33.4175, lng:-111.8291, stars:1, wb:0, gc:0, notes:'Too busy.'},
+  {id:'s2-3',  route_id:'r2', date:'2026-03-04', stop:3,  company:'RSP Architects Mesa',          cat:'Architecture', lat:33.4082, lng:-111.8381, stars:2, wb:1, gc:0, notes:'Nice visit.'},
+  {id:'s2-4',  route_id:'r2', date:'2026-03-04', stop:4,  company:'Layton Construction Mesa',     cat:'Construction', lat:33.4201, lng:-111.8412, stars:1, wb:0, gc:0, notes:'Already have IT.'},
+  {id:'s2-5',  route_id:'r2', date:'2026-03-04', stop:5,  company:'Hardison Downey Construction', cat:'Construction', lat:33.4152, lng:-111.8248, stars:2, wb:1, gc:0, notes:'Open to conversation.'},
+  {id:'s2-6',  route_id:'r2', date:'2026-03-04', stop:6,  company:'Kitchell Mesa',                cat:'Construction', lat:33.4061, lng:-111.8317, stars:1, wb:0, gc:0, notes:'No interest.'},
+  {id:'s2-7',  route_id:'r2', date:'2026-03-04', stop:7,  company:'Wespac Construction',          cat:'Construction', lat:33.4230, lng:-111.8440, stars:2, wb:1, gc:0, notes:'Positive reception.'},
+
+  // Route 3 — 3/6 Phoenix Law Day 1
+  {id:'s3-1',  route_id:'r3', date:'2026-03-06', stop:1,  company:'Fennemore Craig',              cat:'Law',          lat:33.4502, lng:-112.0741, stars:2, wb:0, gc:0, notes:'Warm reception.'},
+  {id:'s3-2',  route_id:'r3', date:'2026-03-06', stop:2,  company:'Phoenix Law Firm — MSP Prospect',cat:'Law',        lat:33.4538, lng:-112.0712, stars:3, wb:0, gc:0, notes:'Actively looking for new MSP. Hot lead.'},
+  {id:'s3-3',  route_id:'r3', date:'2026-03-06', stop:3,  company:'Burch & Cracchiolo',           cat:'Law',          lat:33.4581, lng:-112.0748, stars:2, wb:0, gc:0, notes:'Nice people.'},
+  {id:'s3-4',  route_id:'r3', date:'2026-03-06', stop:4,  company:'Gallagher & Kennedy',          cat:'Law',          lat:33.4441, lng:-112.0723, stars:1, wb:0, gc:0, notes:'No time.'},
+  {id:'s3-5',  route_id:'r3', date:'2026-03-06', stop:5,  company:'Osborn Maledon',               cat:'Law',          lat:33.4621, lng:-112.0734, stars:2, wb:0, gc:0, notes:'Friendly front desk.'},
+  {id:'s3-6',  route_id:'r3', date:'2026-03-06', stop:6,  company:'Polsinelli Phoenix',           cat:'Law',          lat:33.4412, lng:-112.0752, stars:1, wb:0, gc:0, notes:'Too corporate.'},
+  {id:'s3-7',  route_id:'r3', date:'2026-03-06', stop:7,  company:'Lewis Roca',                   cat:'Law',          lat:33.4661, lng:-112.0701, stars:2, wb:0, gc:0, notes:'Good conversation.'},
+
+  // Route 4 — 3/9 Phoenix Law Day 2
+  {id:'s4-1',  route_id:'r4', date:'2026-03-09', stop:1,  company:'Snell & Wilmer',               cat:'Law',          lat:33.4701, lng:-112.0681, stars:2, wb:0, gc:0, notes:''},
+  {id:'s4-2',  route_id:'r4', date:'2026-03-09', stop:2,  company:'Quarles & Brady',              cat:'Law',          lat:33.4738, lng:-112.0714, stars:1, wb:0, gc:0, notes:'Not interested.'},
+  {id:'s4-3',  route_id:'r4', date:'2026-03-09', stop:3,  company:'Jones Skelton & Hochuli',      cat:'Law',          lat:33.4682, lng:-112.0742, stars:3, wb:0, gc:0, notes:'Super sweet lady, intrigued by the concept.'},
+  {id:'s4-4',  route_id:'r4', date:'2026-03-09', stop:4,  company:'Gammage & Burnham',            cat:'Law',          lat:33.4761, lng:-112.0692, stars:2, wb:0, gc:0, notes:'Positive.'},
+  {id:'s4-5',  route_id:'r4', date:'2026-03-09', stop:5,  company:'Coppersmith Brockelman',       cat:'Law',          lat:33.4631, lng:-112.0721, stars:2, wb:0, gc:0, notes:''},
+  {id:'s4-6',  route_id:'r4', date:'2026-03-09', stop:6,  company:'Stinson Phoenix',              cat:'Law',          lat:33.4792, lng:-112.0661, stars:1, wb:0, gc:0, notes:''},
+  {id:'s4-7',  route_id:'r4', date:'2026-03-09', stop:7,  company:'Perkins Coie Phoenix',         cat:'Law',          lat:33.4608, lng:-112.0753, stars:2, wb:0, gc:0, notes:'Nice office.'},
+  {id:'s4-8',  route_id:'r4', date:'2026-03-09', stop:8,  company:'Squire Patton Boggs',          cat:'Law',          lat:33.4821, lng:-112.0731, stars:1, wb:0, gc:0, notes:''},
+
+  // Route 5 — 3/11 "All 3's Day"
+  {id:'s5-1',  route_id:'r5', date:'2026-03-11', stop:1,  company:'Orcutt Winslow',               cat:'Architecture', lat:33.5081, lng:-112.0132, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-2',  route_id:'r5', date:'2026-03-11', stop:2,  company:'SmithGroup Phoenix',           cat:'Architecture', lat:33.5121, lng:-112.0098, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-3',  route_id:'r5', date:'2026-03-11', stop:3,  company:'Gould Evans Phoenix',          cat:'Architecture', lat:33.5062, lng:-112.0158, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-4',  route_id:'r5', date:'2026-03-11', stop:4,  company:'Floor Associates',             cat:'Architecture', lat:33.5142, lng:-112.0071, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-5',  route_id:'r5', date:'2026-03-11', stop:5,  company:'DWL Architects',               cat:'Architecture', lat:33.5041, lng:-112.0182, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-6',  route_id:'r5', date:'2026-03-11', stop:6,  company:'Architekton Tempe',            cat:'Architecture', lat:33.5101, lng:-112.0119, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-7',  route_id:'r5', date:'2026-03-11', stop:7,  company:'Shepley Bulfinch Phoenix',     cat:'Architecture', lat:33.5161, lng:-112.0048, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-8',  route_id:'r5', date:'2026-03-11', stop:8,  company:'RSP Architects Phoenix',       cat:'Architecture', lat:33.5022, lng:-112.0201, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-9',  route_id:'r5', date:'2026-03-11', stop:9,  company:'Vertical Arts Architecture',   cat:'Architecture', lat:33.5181, lng:-112.0029, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+  {id:'s5-10', route_id:'r5', date:'2026-03-11', stop:10, company:'Archon Group',                 cat:'Architecture', lat:33.5002, lng:-112.0221, stars:3, wb:1, gc:0, notes:'All 3s day!'},
+
+  // Route 6 — 3/18 Scottsdale North
+  {id:'s6-1',  route_id:'r6', date:'2026-03-18', stop:1,  company:'HKS Scottsdale',               cat:'Architecture', lat:33.5721, lng:-111.8912, stars:2, wb:1, gc:0, notes:''},
+  {id:'s6-2',  route_id:'r6', date:'2026-03-18', stop:2,  company:'McCarthy Building North',      cat:'Construction', lat:33.5761, lng:-111.8878, stars:1, wb:0, gc:0, notes:''},
+  {id:'s6-3',  route_id:'r6', date:'2026-03-18', stop:3,  company:'Sundt North Scottsdale',       cat:'Construction', lat:33.5682, lng:-111.8941, stars:2, wb:1, gc:0, notes:''},
+  {id:'s6-4',  route_id:'r6', date:'2026-03-18', stop:4,  company:'DPR Construction Scottsdale',  cat:'Construction', lat:33.5801, lng:-111.8852, stars:2, wb:1, gc:0, notes:''},
+  {id:'s6-5',  route_id:'r6', date:'2026-03-18', stop:5,  company:'Ryan Companies Scottsdale',    cat:'Construction', lat:33.5641, lng:-111.8971, stars:1, wb:0, gc:0, notes:''},
+  {id:'s6-6',  route_id:'r6', date:'2026-03-18', stop:6,  company:'Whiting Turner North',         cat:'Construction', lat:33.5841, lng:-111.8821, stars:2, wb:1, gc:0, notes:''},
+  {id:'s6-7',  route_id:'r6', date:'2026-03-18', stop:7,  company:'Hensel Phelps Scottsdale',     cat:'Construction', lat:33.5602, lng:-111.8998, stars:1, wb:0, gc:0, notes:''},
+
+  // Route 7 — 3/20 Phoenix Downtown
+  {id:'s7-1',  route_id:'r7', date:'2026-03-20', stop:1,  company:'Stantec Phoenix',              cat:'Architecture', lat:33.4481, lng:-112.0758, stars:2, wb:1, gc:0, notes:''},
+  {id:'s7-2',  route_id:'r7', date:'2026-03-20', stop:2,  company:'Populous Phoenix',             cat:'Architecture', lat:33.4512, lng:-112.0729, stars:3, wb:1, gc:0, notes:'Very interested in switching MSP.'},
+  {id:'s7-3',  route_id:'r7', date:'2026-03-20', stop:3,  company:'Corgan Phoenix',               cat:'Architecture', lat:33.4552, lng:-112.0701, stars:2, wb:1, gc:0, notes:''},
+  {id:'s7-4',  route_id:'r7', date:'2026-03-20', stop:4,  company:'Dekker Perich Sabatini',       cat:'Architecture', lat:33.4441, lng:-112.0772, stars:1, wb:0, gc:0, notes:'Not a fit.'},
+  {id:'s7-5',  route_id:'r7', date:'2026-03-20', stop:5,  company:'Nix Patterson',                cat:'Law',          lat:33.4591, lng:-112.0683, stars:2, wb:0, gc:0, notes:''},
+  {id:'s7-6',  route_id:'r7', date:'2026-03-20', stop:6,  company:'Withey Morris',                cat:'Law',          lat:33.4421, lng:-112.0788, stars:2, wb:0, gc:0, notes:''},
+  {id:'s7-7',  route_id:'r7', date:'2026-03-20', stop:7,  company:'Ryley Carlock & Applewhite',   cat:'Law',          lat:33.4619, lng:-112.0661, stars:3, wb:0, gc:0, notes:'Great conversation — decision maker present.'},
+
+  // Route 8 — 3/25 Phoenix Law
+  {id:'s8-1',  route_id:'r8', date:'2026-03-25', stop:1,  company:'Greenberg Traurig Phoenix',    cat:'Law',          lat:33.4742, lng:-112.0718, stars:2, wb:1, gc:0, notes:''},
+  {id:'s8-2',  route_id:'r8', date:'2026-03-25', stop:2,  company:'Ballard Spahr Phoenix',        cat:'Law',          lat:33.4762, lng:-112.0701, stars:3, wb:1, gc:0, notes:'Were extremely nice, great energy.'},
+  {id:'s8-3',  route_id:'r8', date:'2026-03-25', stop:3,  company:'DeConcini McDonald',           cat:'Law',          lat:33.4781, lng:-112.0684, stars:3, wb:1, gc:0, notes:'Asked about IT services directly.'},
+  {id:'s8-4',  route_id:'r8', date:'2026-03-25', stop:4,  company:'Parker Schwartz',              cat:'Law',          lat:33.4801, lng:-112.0668, stars:2, wb:1, gc:0, notes:'Got card from Claudia King (Office Admin).'},
+  {id:'s8-5',  route_id:'r8', date:'2026-03-25', stop:5,  company:'Jennings Haug Keleher McLeod', cat:'Law',          lat:33.4738, lng:-112.0731, stars:3, wb:0, gc:0, notes:'Told them IT provider for law firms. High potential.'},
+  {id:'s8-6',  route_id:'r8', date:'2026-03-25', stop:6,  company:'DLR Group Architecture',       cat:'Architecture', lat:33.5092, lng:-112.0271, stars:1, wb:0, gc:0, notes:'Repeat visit — skip next time.'},
+  {id:'s8-7',  route_id:'r8', date:'2026-03-25', stop:7,  company:'Layton Construction',          cat:'Construction', lat:33.5112, lng:-112.0251, stars:1, wb:0, gc:0, notes:'Already have in-house IT.'},
+  {id:'s8-8',  route_id:'r8', date:'2026-03-25', stop:8,  company:'Sundt Construction',           cat:'Construction', lat:33.4052, lng:-112.0181, stars:2, wb:0, gc:0, notes:''},
+  {id:'s8-9',  route_id:'r8', date:'2026-03-25', stop:9,  company:'AMERCO / U-Haul HQ',           cat:'Other',        lat:33.5081, lng:-112.0298, stars:2, wb:0, gc:1, notes:''},
+
+  // Route 9 — 4/1 Phoenix Law
+  {id:'s9-1',  route_id:'r9', date:'2026-04-01', stop:1,  company:'Schmitt Schneck Even & Williams',cat:'Law',        lat:33.4941, lng:-112.0319, stars:3, wb:1, gc:0, notes:'Multiple office managers — all love coffee + Christian angle. 20-min Q&A!'},
+  {id:'s9-2',  route_id:'r9', date:'2026-04-01', stop:2,  company:'Silver Cain',                  cat:'Law',          lat:33.4762, lng:-112.0738, stars:2, wb:1, gc:0, notes:''},
+  {id:'s9-3',  route_id:'r9', date:'2026-04-01', stop:3,  company:'Keller Rohrback Phoenix',      cat:'Law',          lat:33.4741, lng:-112.0752, stars:2, wb:1, gc:0, notes:'Same building as Silver Cain.'},
+  {id:'s9-4',  route_id:'r9', date:'2026-04-01', stop:4,  company:'May Potenza Baran & Gillespie', cat:'Law',         lat:33.4612, lng:-112.0741, stars:2, wb:1, gc:0, notes:''},
+  {id:'s9-5',  route_id:'r9', date:'2026-04-01', stop:5,  company:'Rusing Lopez & Lizardi',       cat:'Law',          lat:33.5091, lng:-112.0311, stars:3, wb:0, gc:0, notes:'Receptionist Carroll — super engaged.'},
+  {id:'s9-6',  route_id:'r9', date:'2026-04-01', stop:6,  company:'HKS Architecture Phoenix',    cat:'Architecture', lat:33.4482, lng:-112.0742, stars:2, wb:1, gc:0, notes:''},
+  {id:'s9-7',  route_id:'r9', date:'2026-04-01', stop:7,  company:'Skanska Construction',         cat:'Construction', lat:33.4738, lng:-112.0701, stars:1, wb:0, gc:0, notes:''},
+  {id:'s9-8',  route_id:'r9', date:'2026-04-01', stop:8,  company:'McGough Construction',         cat:'Construction', lat:33.4028, lng:-112.0148, stars:1, wb:0, gc:0, notes:''},
+
+  // Route 10 — 4/6 Mesa/Chandler
+  {id:'s10-1', route_id:'r10',date:'2026-04-06', stop:1,  company:'Hough Law Offices',            cat:'Law',          lat:33.4152, lng:-111.8315, stars:2, wb:1, gc:0, notes:''},
+  {id:'s10-2', route_id:'r10',date:'2026-04-06', stop:2,  company:'JacksonWhite Law',             cat:'Law',          lat:33.4181, lng:-111.8288, stars:2, wb:1, gc:0, notes:''},
+  {id:'s10-3', route_id:'r10',date:'2026-04-06', stop:3,  company:'Gunderson Denton & Peterson',  cat:'Law',          lat:33.4121, lng:-111.8341, stars:2, wb:1, gc:0, notes:''},
+  {id:'s10-4', route_id:'r10',date:'2026-04-06', stop:4,  company:'MBS Biotechnology',            cat:'Biotech',      lat:33.3481, lng:-111.8412, stars:2, wb:1, gc:0, notes:''},
+  {id:'s10-5', route_id:'r10',date:'2026-04-06', stop:5,  company:'Gable Family Builders',        cat:'Construction', lat:33.3062, lng:-111.8413, stars:1, wb:0, gc:1, notes:''},
 ];
 
-// ============================================================
-// UTILITIES
-// ============================================================
-const fmtDate = d => { if (!d) return '—'; const [y,m,day] = d.split('-'); return `${m}/${day}/${y}`; };
-const gradeInfo = {
-  0: { label:'No Engagement', short:'0', cls:'grade-0', color:'#DC2626', desc:'Not there / invalid / rude / refused' },
-  1: { label:'Coffee Only',   short:'1', cls:'grade-1', color:'#D97706', desc:'Mostly interested in coffee only' },
-  2: { label:'Friendly',      short:'2', cls:'grade-2', color:'#C2410C', desc:'Friendly & open but not strongly IT-interested' },
-  3: { label:'Highly Engaged',short:'3', cls:'grade-3', color:'#15803D', desc:'Excited, asked IT questions, clear business interest' },
-};
-const fuInfo = {
-  not_started:{ label:'Not Started', bg:'#F3F4F6', text:'#6B7280' },
-  contacted:  { label:'Contacted',   bg:'#DBEAFE', text:'#1D4ED8' },
-  waiting:    { label:'Waiting',     bg:'#FEF3C7', text:'#B45309' },
-  qualified:  { label:'Qualified',   bg:'#DCFCE7', text:'#15803D' },
-  closed:     { label:'Closed Won',  bg:'#D1FAE5', text:'#065F46' },
-};
-const exportCSV = (stops) => {
-  const h = ['Date','Route','Stop#','Company','Category','Address','Contact','Grade','WB','GC','Follow-Up','FU Status','Card','Notes'];
-  const rows = stops.map(s => [s.route_date,s.route_id,s.stop_number,s.company_name,s.category,s.address,s.contact_name,s.grade,s.wb,s.gc,s.follow_up?'Yes':'No',s.fu_status,s.card?'Yes':'No',`"${s.notes}"`]);
-  const csv = [h,...rows].map(r=>r.join(',')).join('\n');
-  const blob = new Blob([csv],{type:'text/csv'});
-  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='plexus_routes.csv'; a.click();
-};
+const INIT_ROUTES = [
+  {id:'r1',  date:'2026-02-27', name:'Scottsdale Architecture'},
+  {id:'r2',  date:'2026-03-04', name:'Mesa Architecture + Construction'},
+  {id:'r3',  date:'2026-03-06', name:'Phoenix Law — Day 1'},
+  {id:'r4',  date:'2026-03-09', name:'Phoenix Law — Day 2'},
+  {id:'r5',  date:'2026-03-11', name:'All 3\'s Day ⭐'},
+  {id:'r6',  date:'2026-03-18', name:'North Scottsdale'},
+  {id:'r7',  date:'2026-03-20', name:'Phoenix Downtown Mix'},
+  {id:'r8',  date:'2026-03-25', name:'Phoenix Law + Architecture'},
+  {id:'r9',  date:'2026-04-01', name:'Phoenix Law April'},
+  {id:'r10', date:'2026-04-06', name:'Mesa + Chandler'},
+];
 
-// ============================================================
-// SMALL COMPONENTS
-// ============================================================
-const GradeBadge = ({grade, size='sm'}) => {
-  if (grade === null || grade === undefined) return <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-400">—</span>;
-  const g = gradeInfo[grade];
-  return <span className={`${g.cls} font-semibold rounded-full ${size==='lg'?'px-3 py-1 text-sm':'px-2 py-0.5 text-xs'}`}>Grade {g.short}</span>;
-};
-const FUBadge = ({status}) => {
-  const f = fuInfo[status] || fuInfo.not_started;
-  return <span style={{background:f.bg,color:f.text}} className="px-2 py-0.5 rounded-full text-xs font-medium">{f.label}</span>;
-};
-const KPICard = ({icon, label, value, sub, color='#C17F3B'}) => (
-  <div className="bg-white rounded-xl p-5 shadow-card flex items-start gap-4">
-    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0" style={{background:`${color}18`}}>{icon}</div>
-    <div>
-      <div className="text-2xl font-bold" style={{color:'#2C1810'}}>{value}</div>
-      <div className="text-sm font-medium text-brown mt-0.5">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-    </div>
-  </div>
-);
-
-// ============================================================
-// MODAL
-// ============================================================
-const Modal = ({title, onClose, children}) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(44,24,16,0.45)'}}>
-    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto fade-in">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-sand">
-        <h3 className="font-semibold text-espresso">{title}</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-espresso text-xl leading-none">×</button>
-      </div>
-      <div className="p-6">{children}</div>
-    </div>
-  </div>
-);
-
-// ============================================================
-// STOP DETAIL / EDIT MODAL
-// ============================================================
-const StopModal = ({stop, onClose, onSave}) => {
-  const [s, setS] = useState({...stop});
-  const set = (k,v) => setS(prev => ({...prev,[k]:v}));
+// ── SVG Chart helpers ─────────────────────────────────────────────────
+function SVGBarChart({ data, valueKey='count', labelKey='name', colorKey=null, defaultColor='#C17F3B', height=180 }) {
+  const PL=38,PR=10,PT=10,PB=34,W=460,H=height,IW=W-PL-PR,IH=H-PT-PB;
+  const maxVal=Math.max(...data.map(d=>d[valueKey]||0),1);
+  const gap=IW/Math.max(data.length,1), bw=gap*0.55;
   return (
-    <Modal title={`Stop #${s.stop_number} — ${s.company_name}`} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-brown mb-1">Company</label>
-            <input value={s.company_name} onChange={e=>set('company_name',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-brown mb-1">Category</label>
-            <select value={s.category} onChange={e=>set('category',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-              {['Law','Architecture','Construction','Real Estate','Biotech','Chamber / Org','Invalid','Other'].map(c=><option key={c}>{c}</option>)}
-            </select>
-          </div>
-        </div>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height}}>
+      {[0,.5,1].map((f,i)=>{const y=PT+IH*(1-f);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#F0E6D3" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fontSize="10" fill="#6B3D2E">{Math.round(maxVal*f)}</text></g>;})}
+      <line x1={PL} y1={PT+IH} x2={W-PR} y2={PT+IH} stroke="#E2D1B8" strokeWidth="1.5"/>
+      {data.map((d,i)=>{const cx=PL+gap*i+gap/2,val=d[valueKey]||0,bH=(val/maxVal)*IH,col=colorKey?d[colorKey]:defaultColor;return<g key={i}><rect x={cx-bw/2} y={PT+IH-bH} width={bw} height={Math.max(bH,0)} fill={col} rx="4"/>{val>0&&<text x={cx} y={PT+IH-bH-4} textAnchor="middle" fontSize="11" fontWeight="600" fill={col}>{val}</text>}<text x={cx} y={PT+IH+16} textAnchor="middle" fontSize="10" fill="#6B3D2E">{d[labelKey]}</text></g>;})}
+    </svg>
+  );
+}
+
+function SVGLineChart({ data, valueKey, labelKey='date', maxVal=3, height=180, color='#C17F3B' }) {
+  const PL=38,PR=10,PT=10,PB=34,W=460,H=height,IW=W-PL-PR,IH=H-PT-PB,n=data.length;
+  if(!n) return null;
+  const step=n>1?IW/(n-1):IW/2;
+  const pts=data.map((d,i)=>[PL+(n>1?i*step:IW/2),PT+IH*(1-(d[valueKey]||0)/maxVal)]);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height}}>
+      {[0,1,2,3].filter(v=>v<=maxVal).map(v=>{const y=PT+IH*(1-v/maxVal);return<g key={v}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#F0E6D3" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fontSize="10" fill="#6B3D2E">{v}★</text></g>;})}
+      <line x1={PL} y1={PT+IH} x2={W-PR} y2={PT+IH} stroke="#E2D1B8" strokeWidth="1.5"/>
+      {n>1&&<polyline points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>}
+      {pts.map(([x,y],i)=><g key={i}><circle cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2"/><text x={x} y={PT+IH+16} textAnchor="middle" fontSize="9" fill="#6B3D2E">{data[i][labelKey]}</text></g>)}
+    </svg>
+  );
+}
+
+// ── Star badge ────────────────────────────────────────────────────────
+const STAR_STYLE = {
+  1:{bg:'#FEF3C7',text:'#B45309',border:'#FDE68A',label:'1 Star'},
+  2:{bg:'#FFF7ED',text:'#C2410C',border:'#FED7AA',label:'2 Stars'},
+  3:{bg:'#DCFCE7',text:'#15803D',border:'#BBF7D0',label:'3 Stars'},
+};
+function StarBadge({ stars, size='sm' }) {
+  if(!stars) return <span style={{background:'#F3F4F6',color:'#9CA3AF',border:'1px solid #E5E7EB',borderRadius:99,padding:'2px 10px',fontSize:12,fontWeight:600}}>—</span>;
+  const s=STAR_STYLE[stars]||STAR_STYLE[1];
+  return <span style={{background:s.bg,color:s.text,border:`1px solid ${s.border}`,borderRadius:99,padding:'2px 10px',fontSize:12,fontWeight:600}}>{'⭐'.repeat(stars)}</span>;
+}
+
+function KPICard({ icon, label, value, sub, color='#C17F3B' }) {
+  return (
+    <div className="bg-white rounded-xl p-4" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06),0 4px 16px rgba(44,24,16,0.05)'}}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xl">{icon}</span>
+        <span className="text-xs text-brown font-medium uppercase tracking-wide">{label}</span>
+      </div>
+      <div className="text-3xl font-bold" style={{color}}>{value}</div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Map Page (Leaflet) ────────────────────────────────────────────────
+function MapPage({ stops }) {
+  const mapRef = useRef(null);
+  const instanceRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapRef.current || !window.L) return;
+    if (instanceRef.current) { instanceRef.current.remove(); instanceRef.current = null; }
+
+    const map = L.map(mapRef.current, { zoomControl: true }).setView([33.4800, -111.9800], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(map);
+
+    const colors = { 3:'#15803D', 2:'#C2410C', 1:'#B45309', 0:'#9CA3AF' };
+    const labels = { 3:'⭐⭐⭐', 2:'⭐⭐', 1:'⭐', 0:'—' };
+
+    stops.filter(s => s.lat && s.lng).forEach(s => {
+      const col = colors[s.stars] || colors[0];
+      const marker = L.circleMarker([s.lat, s.lng], {
+        radius: 10, fillColor: col, color: '#fff', weight: 2.5,
+        opacity: 1, fillOpacity: 0.9
+      }).addTo(map);
+      marker.bindPopup(
+        `<div style="font-family:Inter,sans-serif;min-width:180px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${s.company}</div>
+          <div style="color:#6B3D2E;font-size:12px;margin-bottom:6px">${s.date} · ${s.cat}</div>
+          <div style="font-size:16px;margin-bottom:4px">${labels[s.stars] || '—'}</div>
+          ${s.wb||s.gc ? `<div style="font-size:11px;color:#888">WB: ${s.wb} · GC: ${s.gc}</div>` : ''}
+          ${s.notes ? `<div style="font-size:11px;color:#555;margin-top:6px;font-style:italic">${s.notes}</div>` : ''}
+        </div>`
+      );
+    });
+
+    // Legend
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div');
+      div.style.cssText = 'background:white;padding:10px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-family:Inter,sans-serif;font-size:12px';
+      div.innerHTML = [3,2,1].map(n=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${colors[n]}"></span>${labels[n]}</div>`).join('');
+      return div;
+    };
+    legend.addTo(map);
+
+    instanceRef.current = map;
+    return () => { if (instanceRef.current) { instanceRef.current.remove(); instanceRef.current = null; } };
+  }, [stops]);
+
+  const stopsWithCoords = stops.filter(s => s.lat && s.lng).length;
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div className="flex items-center justify-between">
         <div>
-          <label className="block text-xs font-semibold text-brown mb-1">Address</label>
-          <input value={s.address} onChange={e=>set('address',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream" />
+          <h1 className="text-2xl font-bold text-espresso">Route Map</h1>
+          <p className="text-brown text-sm mt-1">{stopsWithCoords} stops plotted across the Phoenix metro</p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-brown mb-1">Contact Name</label>
-            <input value={s.contact_name} onChange={e=>set('contact_name',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-brown mb-1">Contact Title</label>
-            <input value={s.contact_title} onChange={e=>set('contact_title',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream" />
-          </div>
-        </div>
-        {/* Grade */}
-        <div>
-          <label className="block text-xs font-semibold text-brown mb-2">Outcome Grade</label>
-          <div className="flex gap-2">
-            {[0,1,2,3].map(g => (
-              <button key={g} onClick={()=>set('grade',g)}
-                className={`btn-grade flex-1 py-2 rounded-lg text-sm font-bold border-2 ${s.grade===g?'selected':''} ${gradeInfo[g].cls}`}>
-                {g}
-              </button>
-            ))}
-          </div>
-          {s.grade !== null && <p className="text-xs text-gray-500 mt-1">{gradeInfo[s.grade]?.desc}</p>}
-        </div>
-        {/* Coffee Counts */}
-        <div className="grid grid-cols-2 gap-3">
-          {[['wb','☕ Whole Bean'],['gc','🫘 Ground Coffee']].map(([k,lbl])=>(
-            <div key={k}>
-              <label className="block text-xs font-semibold text-brown mb-1">{lbl}</label>
-              <div className="flex items-center gap-2">
-                <button onClick={()=>set(k,Math.max(0,s[k]-1))} className="w-8 h-8 rounded-lg bg-sand text-espresso font-bold text-lg hover:bg-sandDark">−</button>
-                <span className="w-8 text-center font-bold text-espresso">{s[k]}</span>
-                <button onClick={()=>set(k,s[k]+1)} className="w-8 h-8 rounded-lg bg-caramel text-white font-bold text-lg hover:opacity-90">+</button>
-              </div>
+        <div className="flex gap-3 text-xs">
+          {[{c:'#15803D',l:'3 Stars'},{c:'#C2410C',l:'2 Stars'},{c:'#B45309',l:'1 Star'}].map(x=>(
+            <div key={x.l} className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full" style={{background:x.c}}></div>
+              <span className="text-brown">{x.l}</span>
             </div>
           ))}
         </div>
-        {/* Flags */}
-        <div className="flex gap-4 flex-wrap">
-          {[['follow_up','Follow-Up Needed'],['valid','Valid Location'],['repeat','Repeat Stop'],['card','Card Collected']].map(([k,lbl])=>(
-            <label key={k} className="flex items-center gap-2 cursor-pointer text-sm text-espresso">
-              <input type="checkbox" checked={s[k]} onChange={e=>set(k,e.target.checked)} className="rounded" />
-              {lbl}
-            </label>
-          ))}
-        </div>
-        {/* Follow-up status */}
-        {s.follow_up && (
-          <div>
-            <label className="block text-xs font-semibold text-brown mb-1">Follow-Up Status</label>
-            <select value={s.fu_status} onChange={e=>set('fu_status',e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-              {Object.entries(fuInfo).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-            </select>
-          </div>
-        )}
-        <div>
-          <label className="block text-xs font-semibold text-brown mb-1">Notes</label>
-          <textarea value={s.notes} onChange={e=>set('notes',e.target.value)} rows={3} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream resize-none" />
-        </div>
-        <div className="flex gap-3 pt-2">
-          <button onClick={()=>onSave(s)} className="flex-1 py-2.5 rounded-lg text-white font-semibold text-sm" style={{background:'#C17F3B'}}>Save Changes</button>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-lg font-semibold text-sm border border-sandDark text-espresso">Cancel</button>
-        </div>
       </div>
-    </Modal>
+      <div ref={mapRef} style={{height:'580px',width:'100%',borderRadius:12,zIndex:0}}></div>
+    </div>
   );
-};
+}
 
-// ============================================================
-// OVERVIEW PAGE
-// ============================================================
-const OverviewPage = ({stops, routes}) => {
-  const valid = stops.filter(s => s.valid && s.category !== 'Internal');
-  const grade3 = stops.filter(s => s.grade === 3);
-  const fuNeeded = stops.filter(s => s.follow_up);
-  const avgGrade = valid.filter(s=>s.grade!==null).reduce((a,s)=>a+s.grade,0) / (valid.filter(s=>s.grade!==null).length||1);
-  const totalWB = stops.reduce((a,s)=>a+s.wb,0);
-  const totalGC = stops.reduce((a,s)=>a+s.gc,0);
-  const convLeads = stops.filter(s=>s.grade===3&&s.follow_up);
+// ── Overview Page ─────────────────────────────────────────────────────
+function OverviewPage({ stops, routes, beans }) {
+  const valid = stops.filter(s => s.stars > 0);
+  const s3 = stops.filter(s => s.stars === 3).length;
+  const s2 = stops.filter(s => s.stars === 2).length;
+  const s1 = stops.filter(s => s.stars === 1).length;
+  const totalWB = stops.reduce((a,s)=>a+s.wb,0) + beans.wbAdj;
+  const totalGC = stops.reduce((a,s)=>a+s.gc,0) + beans.gcAdj;
+  const avgStars = valid.length ? (valid.reduce((a,s)=>a+s.stars,0)/valid.length).toFixed(2) : '—';
 
-  const gradeData = [0,1,2,3].map(g=>({name:`Grade ${g}`,count:stops.filter(s=>s.grade===g).length,color:gradeInfo[g].color}));
+  const starData = [
+    {name:'⭐',count:s1,color:'#B45309'},
+    {name:'⭐⭐',count:s2,color:'#C2410C'},
+    {name:'⭐⭐⭐',count:s3,color:'#15803D'},
+  ];
 
-  const industryData = useMemo(()=>{
-    const m = {}; stops.filter(s=>s.valid&&s.grade!==null).forEach(s=>{
-      if (!m[s.category]) m[s.category]={name:s.category,total:0,sum:0};
-      m[s.category].total++; m[s.category].sum+=s.grade;
+  const routeTrend = routes.map(r => {
+    const rs = stops.filter(s => s.route_id===r.id && s.stars>0);
+    return { date: r.date.slice(5), avg: rs.length ? +(rs.reduce((a,s)=>a+s.stars,0)/rs.length).toFixed(2) : 0 };
+  }).filter(r => r.avg > 0);
+
+  const byCat = useMemo(() => {
+    const m = {};
+    stops.filter(s=>s.stars>0).forEach(s => {
+      if (!m[s.cat]) m[s.cat] = { name:s.cat, total:0, sum:0 };
+      m[s.cat].total++; m[s.cat].sum += s.stars;
     });
-    return Object.values(m).map(x=>({...x,avg:+(x.sum/x.total).toFixed(2)})).sort((a,b)=>b.avg-a.avg);
-  },[stops]);
+    return Object.values(m).map(x=>({...x,avg:+(x.sum/x.total).toFixed(1)})).sort((a,b)=>b.avg-a.avg);
+  }, [stops]);
 
-  const routeScores = routes.map(r=>{
-    const rs = stops.filter(s=>s.route_id===r.id&&s.grade!==null);
-    return {name:r.date.slice(5),avg:rs.length?+(rs.reduce((a,s)=>a+s.grade,0)/rs.length).toFixed(2):0,stops:rs.length};
-  });
-
-  const recentActivity = [...stops].sort((a,b)=>b.route_date.localeCompare(a.route_date)).slice(0,5);
+  const recent = [...stops].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6);
 
   return (
     <div className="space-y-6 fade-in">
       <div>
         <h1 className="text-2xl font-bold text-espresso">Good morning, Chandler ☕</h1>
-        <p className="text-brown text-sm mt-1">Here's an overview of your coffee outreach campaign across {routes.length} route days.</p>
+        <p className="text-brown text-sm mt-1">{routes.length} route days · {stops.length} total stops · {valid.length} rated</p>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard icon="📍" label="Total Stops" value={stops.filter(s=>s.category!=='Internal').length} sub={`${valid.length} valid`} />
-        <KPICard icon="⭐" label="Grade 3 Leads" value={grade3.length} sub="Highly engaged" color="#15803D" />
-        <KPICard icon="📞" label="Follow-Ups Needed" value={fuNeeded.length} sub={`${convLeads.length} conversion-ready`} color="#B45309" />
-        <KPICard icon="📊" label="Avg Route Score" value={avgGrade.toFixed(2)} sub="Out of 3.0" color="#6B7C3D" />
-        <KPICard icon="☕" label="Whole Bean Given" value={totalWB} sub="bags" />
-        <KPICard icon="🫘" label="Ground Coffee Given" value={totalGC} sub="bags" color="#6B3D2E" />
-        <KPICard icon="🗓️" label="Route Days" value={routes.length} sub="Feb 27 – Apr 6" color="#4A2C1A" />
-        <KPICard icon="🏢" label="Conversion Ready" value={convLeads.length} sub="Grade 3 + follow-up" color="#1D4ED8" />
+        <KPICard icon="📍" label="Total Stops" value={stops.length} sub={`${valid.length} rated`}/>
+        <KPICard icon="⭐⭐⭐" label="3-Star Stops" value={s3} sub="Highly engaged" color="#15803D"/>
+        <KPICard icon="☕" label="Whole Bean Given" value={totalWB} sub="bags total"/>
+        <KPICard icon="🫘" label="Ground Coffee Given" value={totalGC} sub="bags total" color="#6B3D2E"/>
+        <KPICard icon="⭐⭐" label="2-Star Stops" value={s2} sub="Good visits" color="#C2410C"/>
+        <KPICard icon="⭐" label="1-Star Stops" value={s1} sub="Low engagement" color="#B45309"/>
+        <KPICard icon="📊" label="Avg Rating" value={avgStars} sub="Out of 3.0" color="#5C6E2E"/>
+        <KPICard icon="🗓️" label="Route Days" value={routes.length} sub="Feb 27 – Apr 6" color="#4A2C1A"/>
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Grade Breakdown */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Grade Distribution</h3>
-          <SVGBarChart data={gradeData} valueKey="count" labelKey="name" colorKey="color" height={200}/>
+        <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06),0 4px 16px rgba(44,24,16,0.05)'}}>
+          <h3 className="font-semibold text-espresso mb-4">Star Distribution</h3>
+          <SVGBarChart data={starData} valueKey="count" labelKey="name" colorKey="color" height={180}/>
         </div>
-
-        {/* Avg Score by Route Day */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Avg Grade by Route Day</h3>
-          <SVGLineChart data={routeScores} valueKey="avg" labelKey="name" maxVal={3} height={200} color="#C17F3B"/>
+        <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06),0 4px 16px rgba(44,24,16,0.05)'}}>
+          <h3 className="font-semibold text-espresso mb-4">Avg Rating by Route Day</h3>
+          <SVGLineChart data={routeTrend} valueKey="avg" labelKey="date" maxVal={3} height={180} color="#C17F3B"/>
         </div>
       </div>
 
-      {/* Industry Avg + Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Industry Performance */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Avg Grade by Industry</h3>
-          <div className="space-y-3">
-            {industryData.filter(x=>x.name!=='Invalid'&&x.name!=='Internal').map(x=>(
+        <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06),0 4px 16px rgba(44,24,16,0.05)'}}>
+          <h3 className="font-semibold text-espresso mb-4">Avg Rating by Industry</h3>
+          <div className="space-y-3 mt-2">
+            {byCat.map(x => (
               <div key={x.name} className="flex items-center gap-3">
-                <div className="text-sm text-espresso w-44 truncate">{x.name}</div>
+                <div className="text-sm text-espresso w-40 truncate font-medium">{x.name}</div>
                 <div className="flex-1 h-2.5 rounded-full bg-sand overflow-hidden">
                   <div className="h-full rounded-full" style={{width:`${(x.avg/3)*100}%`,background:'#C17F3B'}}></div>
                 </div>
                 <div className="text-sm font-bold text-espresso w-8 text-right">{x.avg}</div>
-                <div className="text-xs text-gray-400 w-12">({x.total})</div>
+                <div className="text-xs text-gray-400 w-10">({x.total})</div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Recent Activity */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
+        <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06),0 4px 16px rgba(44,24,16,0.05)'}}>
           <h3 className="font-semibold text-espresso mb-4">Recent Stops</h3>
           <div className="space-y-3">
-            {recentActivity.map(s=>(
+            {recent.map(s => (
               <div key={s.id} className="flex items-start gap-3">
-                <GradeBadge grade={s.grade} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-espresso truncate">{s.company_name}</div>
-                  <div className="text-xs text-gray-400">{fmtDate(s.route_date)} · {s.category}</div>
+                <div className="flex-shrink-0 mt-0.5"><StarBadge stars={s.stars}/></div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-espresso truncate">{s.company}</div>
+                  <div className="text-xs text-brown">{s.date} · {s.cat}</div>
+                  {s.notes && <div className="text-xs text-gray-500 mt-0.5 truncate">{s.notes}</div>}
                 </div>
-                {s.follow_up && <span className="text-xs text-caramel font-medium mt-0.5">Follow-up</span>}
               </div>
             ))}
           </div>
         </div>
       </div>
-
-      {/* Grade 3 Alerts */}
-      {grade3.filter(s=>s.follow_up&&s.fu_status==='not_started').length>0 && (
-        <div className="bg-white border-l-4 rounded-xl p-5 shadow-card" style={{borderColor:'#15803D'}}>
-          <h3 className="font-semibold text-espresso mb-3">🚨 High-Value Leads Awaiting Action</h3>
-          <div className="space-y-2">
-            {grade3.filter(s=>s.follow_up&&s.fu_status==='not_started').map(s=>(
-              <div key={s.id} className="flex items-center justify-between text-sm">
-                <span className="text-espresso font-medium">{s.company_name}</span>
-                <span className="text-gray-400">{fmtDate(s.route_date)} · {s.category}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
-};
+}
 
-// ============================================================
-// ROUTES PAGE
-// ============================================================
-const RoutesPage = ({stops, routes, onEditStop, onDeleteStop}) => {
+// ── Log Page ──────────────────────────────────────────────────────────
+function LogPage({ stops, routes, onDelete }) {
   const [search, setSearch] = useState('');
-  const [filterGrade, setFilterGrade] = useState('all');
+  const [filterStars, setFilterStars] = useState('all');
   const [filterCat, setFilterCat] = useState('all');
-  const [sortKey, setSortKey] = useState('route_date');
-  const [selectedStop, setSelectedStop] = useState(null);
-  const [expandedRoute, setExpandedRoute] = useState(null);
+  const [expanded, setExpanded] = useState(null);
 
-  const categories = [...new Set(stops.map(s=>s.category))].sort();
+  const cats = [...new Set(stops.map(s=>s.cat))].sort();
 
-  const filtered = useMemo(()=>{
-    return stops.filter(s => {
-      if (filterGrade !== 'all' && s.grade !== parseInt(filterGrade)) return false;
-      if (filterCat !== 'all' && s.category !== filterCat) return false;
-      if (search && ![s.company_name,s.address,s.contact_name,s.notes].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
-    }).sort((a,b) => {
-      if (sortKey==='grade') return (b.grade??-1)-(a.grade??-1);
-      if (sortKey==='company') return a.company_name.localeCompare(b.company_name);
-      return a.route_date.localeCompare(b.route_date) || a.stop_number - b.stop_number;
-    });
-  },[stops,search,filterGrade,filterCat,sortKey]);
+  const filtered = useMemo(() => stops.filter(s => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || s.company.toLowerCase().includes(q) || s.notes.toLowerCase().includes(q) || s.cat.toLowerCase().includes(q);
+    const matchStars = filterStars === 'all' || s.stars === parseInt(filterStars);
+    const matchCat = filterCat === 'all' || s.cat === filterCat;
+    return matchSearch && matchStars && matchCat;
+  }).sort((a,b) => b.date.localeCompare(a.date)), [stops, search, filterStars, filterCat]);
+
+  const grouped = useMemo(() => {
+    const m = {};
+    filtered.forEach(s => { if (!m[s.date]) m[s.date] = []; m[s.date].push(s); });
+    return Object.entries(m).sort((a,b) => b[0].localeCompare(a[0]));
+  }, [filtered]);
 
   return (
-    <div className="space-y-5 fade-in">
+    <div className="space-y-4 fade-in">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-espresso">All Routes</h1>
-        <button onClick={()=>exportCSV(stops)} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:'#6B7C3D'}}>⬇ Export CSV</button>
+        <h1 className="text-2xl font-bold text-espresso">Stop Log</h1>
+        <span className="text-sm text-brown">{filtered.length} stops</span>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 shadow-card flex flex-wrap gap-3">
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search companies, notes, contacts…"
-          className="border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream flex-1 min-w-48" />
-        <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-          <option value="all">All Grades</option>
-          {[0,1,2,3].map(g=><option key={g} value={g}>Grade {g} — {gradeInfo[g].label}</option>)}
+      <div className="flex gap-3 flex-wrap">
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search companies..." className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-caramel flex-1 min-w-48" style={{color:'#2C1810'}}/>
+        <select value={filterStars} onChange={e=>setFilterStars(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}>
+          <option value="all">All Stars</option>
+          <option value="3">⭐⭐⭐ 3 Stars</option>
+          <option value="2">⭐⭐ 2 Stars</option>
+          <option value="1">⭐ 1 Star</option>
         </select>
-        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-          <option value="all">All Categories</option>
-          {categories.map(c=><option key={c}>{c}</option>)}
-        </select>
-        <select value={sortKey} onChange={e=>setSortKey(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-          <option value="route_date">Sort: Date</option>
-          <option value="grade">Sort: Grade ↓</option>
-          <option value="company">Sort: Company A–Z</option>
+        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}>
+          <option value="all">All Industries</option>
+          {cats.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
-      {/* Route Day Groups */}
-      {routes.map(r=>{
-        const rStops = filtered.filter(s=>s.route_id===r.id);
-        if (!rStops.length) return null;
-        const avgG = rStops.filter(s=>s.grade!==null).reduce((a,s)=>a+s.grade,0)/(rStops.filter(s=>s.grade!==null).length||1);
-        const totalWB = rStops.reduce((a,s)=>a+s.wb,0);
-        const totalGC = rStops.reduce((a,s)=>a+s.gc,0);
-        const expanded = expandedRoute === r.id || expandedRoute === null;
-        return (
-          <div key={r.id} className="bg-white rounded-xl shadow-card overflow-hidden">
-            {/* Route Header */}
-            <button onClick={()=>setExpandedRoute(expandedRoute===r.id?null:r.id)}
-              className="w-full flex items-center justify-between px-5 py-4 hover:bg-cream transition-colors">
-              <div className="flex items-center gap-4">
-                <div className="text-left">
-                  <div className="font-semibold text-espresso">{r.name}</div>
-                  <div className="text-xs text-gray-400">{fmtDate(r.date)} · {r.rep} · {r.focus}</div>
+      <div className="space-y-3">
+        {grouped.map(([date, dayStops]) => {
+          const route = routes.find(r => r.date === date);
+          const isOpen = expanded === date;
+          return (
+            <div key={date} className="bg-white rounded-xl overflow-hidden" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+              <button onClick={()=>setExpanded(isOpen ? null : date)} className="w-full flex items-center justify-between px-5 py-3 hover:bg-cream/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm font-bold text-espresso">{date}</div>
+                  {route && <div className="text-xs text-brown bg-sand px-2 py-0.5 rounded-full">{route.name}</div>}
+                  <div className="text-xs text-gray-400">{dayStops.length} stops</div>
                 </div>
-              </div>
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-gray-500">{rStops.length} stops</span>
-                <span className="font-semibold text-caramel">Avg {avgG.toFixed(1)}</span>
-                <span className="text-gray-400">☕{totalWB} 🫘{totalGC}</span>
-                <span className="text-gray-400 text-lg">{expandedRoute===r.id?'▲':'▼'}</span>
-              </div>
-            </button>
-
-            {/* Stops Table */}
-            {expandedRoute===r.id && (
-              <div className="overflow-x-auto border-t border-sand">
-                <table className="w-full text-sm">
-                  <thead><tr className="bg-cream text-brown text-xs uppercase tracking-wide">
-                    <th className="px-4 py-2 text-left">#</th>
-                    <th className="px-4 py-2 text-left">Company</th>
-                    <th className="px-4 py-2 text-left">Category</th>
-                    <th className="px-4 py-2 text-left">Contact</th>
-                    <th className="px-4 py-2 text-center">Grade</th>
-                    <th className="px-4 py-2 text-center">WB</th>
-                    <th className="px-4 py-2 text-center">GC</th>
-                    <th className="px-4 py-2 text-center">Follow-Up</th>
-                    <th className="px-4 py-2 text-left">Notes</th>
-                    <th className="px-4 py-2"></th>
-                  </tr></thead>
-                  <tbody>{rStops.map((s,i)=>(
-                    <tr key={s.id} className={`border-t border-sand ${i%2===0?'bg-white':'bg-cream/40'} hover:bg-sand/30 transition-colors`}>
-                      <td className="px-4 py-3 text-espresso font-medium">{s.stop_number}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-espresso">{s.company_name}</div>
-                        <div className="text-xs text-gray-400 truncate max-w-xs">{s.address}</div>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{s.category}</td>
-                      <td className="px-4 py-3 text-gray-600">{s.contact_name||'—'}</td>
-                      <td className="px-4 py-3 text-center"><GradeBadge grade={s.grade}/></td>
-                      <td className="px-4 py-3 text-center text-espresso font-medium">{s.wb||'—'}</td>
-                      <td className="px-4 py-3 text-center text-espresso font-medium">{s.gc||'—'}</td>
-                      <td className="px-4 py-3 text-center">{s.follow_up?<FUBadge status={s.fu_status}/>:<span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{s.notes||'—'}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button onClick={()=>setSelectedStop(s)} className="px-2 py-1 rounded text-xs bg-sand text-espresso hover:bg-sandDark">Edit</button>
-                          <button onClick={()=>onDeleteStop(s.id)} className="px-2 py-1 rounded text-xs bg-red-50 text-red-400 hover:bg-red-100">Del</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {selectedStop && <StopModal stop={selectedStop} onClose={()=>setSelectedStop(null)} onSave={s=>{onEditStop(s);setSelectedStop(null);}} />}
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    {[3,2,1].map(n => { const c=dayStops.filter(s=>s.stars===n).length; return c>0?<span key={n} className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{background:STAR_STYLE[n].bg,color:STAR_STYLE[n].text}}>{c}×{'⭐'.repeat(n)}</span>:null; })}
+                  </div>
+                  <span className="text-gray-400 text-xs">{isOpen?'▲':'▼'}</span>
+                </div>
+              </button>
+              {isOpen && (
+                <div className="border-t border-sand">
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-cream text-xs text-brown uppercase tracking-wide">
+                      <th className="px-4 py-2 text-left">#</th>
+                      <th className="px-4 py-2 text-left">Company</th>
+                      <th className="px-4 py-2 text-left">Industry</th>
+                      <th className="px-4 py-2 text-center">Rating</th>
+                      <th className="px-4 py-2 text-center">WB</th>
+                      <th className="px-4 py-2 text-center">GC</th>
+                      <th className="px-4 py-2 text-left">Notes</th>
+                      <th className="px-4 py-2"></th>
+                    </tr></thead>
+                    <tbody>
+                      {dayStops.sort((a,b)=>a.stop-b.stop).map((s,i) => (
+                        <tr key={s.id} className={`border-t border-sand/60 ${i%2===0?'bg-white':'bg-cream/20'}`}>
+                          <td className="px-4 py-2.5 text-gray-400 text-xs">{s.stop}</td>
+                          <td className="px-4 py-2.5 font-medium text-espresso max-w-xs truncate">{s.company}</td>
+                          <td className="px-4 py-2.5 text-brown text-xs">{s.cat}</td>
+                          <td className="px-4 py-2.5 text-center"><StarBadge stars={s.stars}/></td>
+                          <td className="px-4 py-2.5 text-center text-gray-600">{s.wb||'—'}</td>
+                          <td className="px-4 py-2.5 text-center text-gray-600">{s.gc||'—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-gray-500 max-w-xs truncate">{s.notes}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button onClick={()=>{if(confirm(`Delete ${s.company}?`))onDelete(s.id);}} className="text-gray-300 hover:text-red-400 text-xs transition-colors">✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!grouped.length && <div className="text-center py-12 text-brown">No stops match your filter.</div>}
+      </div>
     </div>
   );
-};
+}
 
-// ============================================================
-// DAILY ENTRY PAGE
-// ============================================================
-const DailyEntryPage = ({routes, stops, onAddRoute, onAddStop}) => {
-  const [selRoute, setSelRoute] = useState(routes[routes.length-1]?.id||'');
-  const [showNewRoute, setShowNewRoute] = useState(false);
-  const [newRoute, setNewRoute] = useState({date:new Date().toISOString().slice(0,10),name:'',rep:'Chandler White',area:'Phoenix AZ',focus:'Law'});
-  const [newStop, setNewStop] = useState({stop_number:'',company_name:'',category:'Law',address:'',contact_name:'',contact_title:'',phone:'',grade:null,wb:0,gc:0,follow_up:false,fu_status:'not_started',valid:true,repeat:false,card:false,notes:''});
-  const [showStopForm, setShowStopForm] = useState(false);
-  const [editingStop, setEditingStop] = useState(null);
+// ── Add Stop Page ─────────────────────────────────────────────────────
+function AddStopPage({ stops, routes, onAddStop, onAddRoute }) {
+  const today = new Date().toISOString().slice(0,10);
+  const [selDate, setSelDate] = useState(today);
+  const [form, setForm] = useState({ company:'', cat:'Law', address:'', contact:'', stars:null, wb:0, gc:0, notes:'' });
+  const [saved, setSaved] = useState(false);
+  const [newRouteName, setNewRouteName] = useState('');
 
-  const route = routes.find(r=>r.id===selRoute);
-  const routeStops = stops.filter(s=>s.route_id===selRoute).sort((a,b)=>a.stop_number-b.stop_number);
-  const totalWB = routeStops.reduce((a,s)=>a+s.wb,0);
-  const totalGC = routeStops.reduce((a,s)=>a+s.gc,0);
+  const routeForDate = routes.find(r => r.date === selDate);
+  const stopsForDate = stops.filter(s => s.date === selDate);
 
-  const submitStop = () => {
-    if (!newStop.company_name) return;
-    onAddStop({...newStop,id:`s-${Date.now()}`,route_id:selRoute,route_date:route?.date||'',stop_number:parseInt(newStop.stop_number)||routeStops.length+1,wb:newStop.wb,gc:newStop.gc});
-    setNewStop({stop_number:'',company_name:'',category:'Law',address:'',contact_name:'',contact_title:'',phone:'',grade:null,wb:0,gc:0,follow_up:false,fu_status:'not_started',valid:true,repeat:false,card:false,notes:''});
-    setShowStopForm(false);
+  const upd = (k,v) => setForm(p => ({...p,[k]:v}));
+
+  const handleSave = () => {
+    if (!form.company.trim()) return;
+    const id = `s-${Date.now()}`;
+    const routeId = routeForDate ? routeForDate.id : `r-${Date.now()}`;
+    if (!routeForDate) onAddRoute({ id:routeId, date:selDate, name:newRouteName||`Route ${selDate}` });
+    onAddStop({
+      id, route_id:routeId, date:selDate, stop:stopsForDate.length+1,
+      company:form.company, cat:form.cat, address:form.address,
+      contact:form.contact, stars:form.stars, wb:form.wb, gc:form.gc,
+      notes:form.notes, lat:null, lng:null
+    });
+    setForm({ company:'', cat:'Law', address:'', contact:'', stars:null, wb:0, gc:0, notes:'' });
+    setSaved(true); setTimeout(()=>setSaved(false), 2000);
   };
 
-  return (
-    <div className="space-y-5 fade-in">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-espresso">Daily Route Entry</h1>
-        <button onClick={()=>setShowNewRoute(true)} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:'#C17F3B'}}>+ New Route Day</button>
-      </div>
-
-      {/* Route Selector */}
-      <div className="bg-white rounded-xl p-5 shadow-card">
-        <label className="block text-xs font-semibold text-brown mb-2">Select Route Day</label>
-        <select value={selRoute} onChange={e=>setSelRoute(e.target.value)} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm text-espresso bg-cream">
-          {routes.map(r=><option key={r.id} value={r.id}>{fmtDate(r.date)} — {r.name}</option>)}
-        </select>
-        {route && (
-          <div className="mt-3 flex gap-6 text-sm text-brown">
-            <span>🧑 {route.rep}</span>
-            <span>📍 {route.area}</span>
-            <span>🏢 {route.focus}</span>
-            <span>☕ {totalWB} WB · 🫘 {totalGC} GC total</span>
-          </div>
-        )}
-      </div>
-
-      {/* Daily Totals */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl p-4 shadow-card text-center">
-          <div className="text-3xl font-bold text-espresso">{routeStops.length}</div>
-          <div className="text-sm text-brown mt-1">Total Stops</div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow-card text-center">
-          <div className="text-3xl font-bold" style={{color:'#C17F3B'}}>{totalWB}</div>
-          <div className="text-sm text-brown mt-1">☕ Whole Bean</div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow-card text-center">
-          <div className="text-3xl font-bold" style={{color:'#6B3D2E'}}>{totalGC}</div>
-          <div className="text-sm text-brown mt-1">🫘 Ground Coffee</div>
-        </div>
-      </div>
-
-      {/* Stops List */}
-      <div className="bg-white rounded-xl shadow-card overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-sand">
-          <h3 className="font-semibold text-espresso">Stops for This Route</h3>
-          <button onClick={()=>setShowStopForm(true)} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white" style={{background:'#5C6E2E'}}>+ Add Stop</button>
-        </div>
-        {routeStops.length===0 ? (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-3">☕</div>
-            <div>No stops logged yet. Add your first stop above.</div>
-          </div>
-        ) : (
-          <div className="divide-y divide-sand">
-            {routeStops.map(s=>(
-              <div key={s.id} className="px-5 py-4 flex items-start gap-4">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{background:'#F0E6D3',color:'#6B3D2E'}}>{s.stop_number}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-espresso">{s.company_name}</span>
-                    <span className="text-xs text-gray-400">{s.category}</span>
-                    <GradeBadge grade={s.grade}/>
-                    {s.follow_up && <FUBadge status={s.fu_status}/>}
-                    {s.card && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">Card ✓</span>}
-                  </div>
-                  {s.contact_name && <div className="text-xs text-gray-500 mt-0.5">Contact: {s.contact_name} {s.contact_title?`(${s.contact_title})`:''}</div>}
-                  {s.notes && <div className="text-xs text-gray-500 mt-1 italic">"{s.notes}"</div>}
-                  <div className="text-xs text-gray-400 mt-1">☕{s.wb} WB · 🫘{s.gc} GC {s.repeat?'· 🔁 Repeat':''}</div>
-                </div>
-                <button onClick={()=>setEditingStop(s)} className="text-xs text-caramel hover:underline flex-shrink-0">Edit</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* New Stop Form */}
-      {showStopForm && (
-        <Modal title="Log New Stop" onClose={()=>setShowStopForm(false)}>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-semibold text-brown mb-1">Stop #</label>
-                <input value={newStop.stop_number} onChange={e=>setNewStop(p=>({...p,stop_number:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" placeholder={routeStops.length+1} /></div>
-              <div><label className="block text-xs font-semibold text-brown mb-1">Category</label>
-                <select value={newStop.category} onChange={e=>setNewStop(p=>({...p,category:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream">
-                  {['Law','Architecture','Construction','Real Estate','Biotech','Chamber / Org','Other'].map(c=><option key={c}>{c}</option>)}
-                </select></div>
-            </div>
-            <div><label className="block text-xs font-semibold text-brown mb-1">Company Name *</label>
-              <input value={newStop.company_name} onChange={e=>setNewStop(p=>({...p,company_name:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" /></div>
-            <div><label className="block text-xs font-semibold text-brown mb-1">Address</label>
-              <input value={newStop.address} onChange={e=>setNewStop(p=>({...p,address:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-semibold text-brown mb-1">Contact</label>
-                <input value={newStop.contact_name} onChange={e=>setNewStop(p=>({...p,contact_name:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" /></div>
-              <div><label className="block text-xs font-semibold text-brown mb-1">Title</label>
-                <input value={newStop.contact_title} onChange={e=>setNewStop(p=>({...p,contact_title:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" /></div>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-brown mb-2">Grade</label>
-              <div className="flex gap-2">
-                {[0,1,2,3].map(g=>(
-                  <button key={g} onClick={()=>setNewStop(p=>({...p,grade:g}))}
-                    className={`btn-grade flex-1 py-2 rounded-lg text-sm font-bold border-2 ${newStop.grade===g?'selected':''} ${gradeInfo[g].cls}`}>{g}</button>
-                ))}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              {[['wb','☕ Whole Bean'],['gc','🫘 Ground']].map(([k,lbl])=>(
-                <div key={k}><label className="block text-xs font-semibold text-brown mb-1">{lbl}</label>
-                  <div className="flex items-center gap-2">
-                    <button onClick={()=>setNewStop(p=>({...p,[k]:Math.max(0,p[k]-1)}))} className="w-8 h-8 rounded-lg bg-sand font-bold">−</button>
-                    <span className="w-8 text-center font-bold text-espresso">{newStop[k]}</span>
-                    <button onClick={()=>setNewStop(p=>({...p,[k]:p[k]+1}))} className="w-8 h-8 rounded-lg font-bold text-white" style={{background:'#C17F3B'}}>+</button>
-                  </div></div>
-              ))}
-            </div>
-            <div className="flex gap-4 flex-wrap">
-              {[['follow_up','Follow-Up Needed'],['card','Card Collected'],['repeat','Repeat Stop'],['valid','Valid Location']].map(([k,lbl])=>(
-                <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
-                  <input type="checkbox" checked={newStop[k]} onChange={e=>setNewStop(p=>({...p,[k]:e.target.checked}))} />
-                  {lbl}
-                </label>
-              ))}
-            </div>
-            <div><label className="block text-xs font-semibold text-brown mb-1">Notes</label>
-              <textarea value={newStop.notes} onChange={e=>setNewStop(p=>({...p,notes:e.target.value}))} rows={2} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream resize-none" /></div>
-            <button onClick={submitStop} className="w-full py-2.5 rounded-lg text-white font-semibold" style={{background:'#C17F3B'}}>Log Stop</button>
-          </div>
-        </Modal>
-      )}
-
-      {editingStop && <StopModal stop={editingStop} onClose={()=>setEditingStop(null)} onSave={s=>{onAddStop(s,true);setEditingStop(null);}} />}
-
-      {/* New Route Modal */}
-      {showNewRoute && (
-        <Modal title="Create New Route Day" onClose={()=>setShowNewRoute(false)}>
-          <div className="space-y-4">
-            {[['date','Date','date'],['name','Route Name','text'],['rep','Rep Name','text'],['area','Area / Territory','text'],['focus','Industry Focus','text']].map(([k,lbl,t])=>(
-              <div key={k}><label className="block text-xs font-semibold text-brown mb-1">{lbl}</label>
-                <input type={t} value={newRoute[k]} onChange={e=>setNewRoute(p=>({...p,[k]:e.target.value}))} className="w-full border border-sandDark rounded-lg px-3 py-2 text-sm bg-cream" /></div>
-            ))}
-            <button onClick={()=>{onAddRoute({...newRoute,id:`r-${Date.now()}`});setShowNewRoute(false);setSelRoute(`r-${Date.now()-1}`);}} className="w-full py-2.5 rounded-lg text-white font-semibold" style={{background:'#C17F3B'}}>Create Route</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-// ============================================================
-// FOLLOW-UPS PAGE
-// ============================================================
-const FollowUpsPage = ({stops, onEditStop}) => {
-  const [filter, setFilter] = useState('all');
-  const [editStop, setEditStop] = useState(null);
-  const fuStops = stops.filter(s=>s.follow_up).sort((a,b)=>(b.grade??0)-(a.grade??0)||a.route_date.localeCompare(b.route_date));
-  const shown = filter==='all'?fuStops:fuStops.filter(s=>s.fu_status===filter);
-
-  return (
-    <div className="space-y-5 fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-espresso">Follow-Ups</h1>
-        <p className="text-brown text-sm mt-1">{fuStops.length} total · {fuStops.filter(s=>s.grade===3).length} Grade 3 · {fuStops.filter(s=>s.fu_status==='not_started').length} not yet contacted</p>
-      </div>
-
-      {/* Status Filter Tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {[['all','All'],['not_started','Not Started'],['contacted','Contacted'],['waiting','Waiting'],['qualified','Qualified'],['closed','Closed Won']].map(([v,l])=>(
-          <button key={v} onClick={()=>setFilter(v)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter===v?'text-white':'bg-white text-brown border border-sand'}`}
-            style={filter===v?{background:'#C17F3B'}:{}}>
-            {l} <span className="ml-1 opacity-70">{v==='all'?fuStops.length:fuStops.filter(s=>s.fu_status===v).length}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Follow-up Cards */}
-      <div className="grid gap-4">
-        {shown.map(s=>(
-          <div key={s.id} className={`bg-white rounded-xl p-5 shadow-card border-l-4 ${s.grade===3?'border-green-400':s.grade===2?'border-caramel':'border-sand'}`}>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-espresso">{s.company_name}</span>
-                  <GradeBadge grade={s.grade} size="lg"/>
-                  <FUBadge status={s.fu_status}/>
-                  {s.card && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600 font-medium">Card Collected</span>}
-                  {s.repeat && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-500 font-medium">Repeat</span>}
-                </div>
-                <div className="text-sm text-gray-500 mt-1">{fmtDate(s.route_date)} · {s.category} · {s.address}</div>
-                {s.contact_name && (
-                  <div className="mt-2 text-sm">
-                    <span className="font-medium text-espresso">{s.contact_name}</span>
-                    {s.contact_title && <span className="text-gray-400"> — {s.contact_title}</span>}
-                    {s.phone && <span className="text-gray-400"> · {s.phone}</span>}
-                  </div>
-                )}
-                {s.notes && <div className="mt-2 text-sm text-gray-600 italic bg-cream rounded-lg px-3 py-2">"{s.notes}"</div>}
-              </div>
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                <button onClick={()=>setEditStop(s)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sand text-espresso hover:bg-sandDark">Edit</button>
-                <select value={s.fu_status} onChange={e=>onEditStop({...s,fu_status:e.target.value})}
-                  className="border border-sandDark rounded-lg px-2 py-1 text-xs text-espresso bg-cream">
-                  {Object.entries(fuInfo).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-        ))}
-        {shown.length===0 && (
-          <div className="text-center py-16 text-gray-400">
-            <div className="text-4xl mb-3">✅</div>
-            <div>All caught up! No follow-ups in this category.</div>
-          </div>
-        )}
-      </div>
-      {editStop && <StopModal stop={editStop} onClose={()=>setEditStop(null)} onSave={s=>{onEditStop(s);setEditStop(null);}} />}
-    </div>
-  );
-};
-
-// ============================================================
-// ANALYTICS PAGE
-// ============================================================
-const AnalyticsPage = ({stops, routes}) => {
-  const validStops = stops.filter(s=>s.valid&&s.grade!==null&&s.category!=='Internal');
-
-  const byRoute = routes.map(r=>{
-    const rs = validStops.filter(s=>s.route_id===r.id);
-    const avg = rs.length?+(rs.reduce((a,s)=>a+s.grade,0)/rs.length).toFixed(2):0;
-    const wb = rs.reduce((a,s)=>a+s.wb,0);
-    const gc = rs.reduce((a,s)=>a+s.gc,0);
-    const g3 = rs.filter(s=>s.grade===3).length;
-    return {name:r.date.slice(5),fullName:r.name,avg,wb,gc,g3,stops:rs.length};
-  }).filter(x=>x.stops>0);
-
-  const byCat = useMemo(()=>{
-    const m = {};
-    validStops.forEach(s=>{
-      if(!m[s.category]) m[s.category]={name:s.category,total:0,sum:0,g3:0,wb:0,gc:0};
-      m[s.category].total++; m[s.category].sum+=s.grade;
-      if(s.grade===3) m[s.category].g3++;
-      m[s.category].wb+=s.wb; m[s.category].gc+=s.gc;
-    });
-    return Object.values(m).map(x=>({...x,avg:+(x.sum/x.total).toFixed(2)})).sort((a,b)=>b.avg-a.avg);
-  },[validStops]);
-
-  const sampleData = byRoute.map(r=>({name:r.name,WB:r.wb,GC:r.gc}));
-  const g3Trend = byRoute.map(r=>({name:r.name,'Grade 3':r.g3}));
-  const totalWB = stops.reduce((a,s)=>a+s.wb,0);
-  const totalGC = stops.reduce((a,s)=>a+s.gc,0);
-  const pieData = [{name:'Whole Bean',value:totalWB},{name:'Ground Coffee',value:totalGC}];
+  const CATS = ['Law','Architecture','Construction','Biotech','Finance','Healthcare','Real Estate','Other'];
 
   return (
     <div className="space-y-6 fade-in">
-      <h1 className="text-2xl font-bold text-espresso">Analytics</h1>
+      <h1 className="text-2xl font-bold text-espresso">Log a Stop</h1>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {l:'Total Samples',v:totalWB+totalGC,s:`${totalWB} WB · ${totalGC} GC`,c:'#C17F3B'},
-          {l:'Grade 3 Rate',v:`${((validStops.filter(s=>s.grade===3).length/validStops.length)*100).toFixed(0)}%`,s:`${validStops.filter(s=>s.grade===3).length} of ${validStops.length} valid stops`,c:'#15803D'},
-          {l:'Best Route Day',v:byRoute.sort((a,b)=>b.avg-a.avg)[0]?.name||'—',s:`Avg grade ${byRoute.sort((a,b)=>b.avg-a.avg)[0]?.avg||0}`,c:'#6B7C3D'},
-          {l:'Cards Collected',v:stops.filter(s=>s.card).length,s:'Business cards',c:'#1D4ED8'},
-        ].map((k,i)=><KPICard key={i} icon={['☕','⭐','🗓️','💳'][i]} label={k.l} value={k.v} sub={k.s} color={k.c}/>)}
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-5">
+          {/* Date */}
+          <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+            <label className="block text-sm font-semibold text-espresso mb-2">Route Date</label>
+            <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}/>
+            {routeForDate
+              ? <p className="text-xs text-brown mt-2">Adding to: <strong>{routeForDate.name}</strong> ({stopsForDate.length} stops so far)</p>
+              : <div className="mt-3"><label className="text-xs text-brown font-medium">New route name (optional)</label><input value={newRouteName} onChange={e=>setNewRouteName(e.target.value)} placeholder="e.g. Phoenix Law Week 3" className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full mt-1 focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}/></div>}
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Samples Over Time */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Coffee Samples by Route Day</h3>
-          <SVGBarChart data={sampleData} labelKey="name" multiKeys={['WB','GC']} multiColors={['#C17F3B','#6B3D2E']} multiLabels={['Whole Bean','Ground Coffee']} height={220}/>
+          {/* Stop details */}
+          <div className="bg-white rounded-xl p-5 space-y-4" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-espresso mb-1">Company Name *</label>
+                <input value={form.company} onChange={e=>upd('company',e.target.value)} placeholder="Acme Law Group" className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}/>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-espresso mb-1">Industry</label>
+                <select value={form.cat} onChange={e=>upd('cat',e.target.value)} className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}>
+                  {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-espresso mb-1">Contact Name</label>
+                <input value={form.contact} onChange={e=>upd('contact',e.target.value)} placeholder="Jane Smith" className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}/>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-espresso mb-1">Address</label>
+                <input value={form.address} onChange={e=>upd('address',e.target.value)} placeholder="1234 N Central Ave, Phoenix AZ 85004" className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel" style={{color:'#2C1810'}}/>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-espresso mb-1">Notes</label>
+                <textarea value={form.notes} onChange={e=>upd('notes',e.target.value)} rows={3} placeholder="What happened? Any key details..." className="border border-sandDark rounded-lg px-3 py-2 text-sm bg-white w-full focus:outline-none focus:border-caramel resize-none" style={{color:'#2C1810'}}/>
+              </div>
+            </div>
+          </div>
+
+          {/* Rating + beans */}
+          <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-semibold text-espresso mb-3">Star Rating</label>
+                <div className="flex gap-2">
+                  {[1,2,3].map(n => (
+                    <button key={n} onClick={()=>upd('stars', form.stars===n?null:n)}
+                      className="flex-1 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all"
+                      style={form.stars===n ? {background:STAR_STYLE[n].bg,borderColor:STAR_STYLE[n].text,color:STAR_STYLE[n].text} : {background:'#F9F9F9',borderColor:'#E2D1B8',color:'#9CA3AF'}}>
+                      {'⭐'.repeat(n)}
+                    </button>
+                  ))}
+                </div>
+                {!form.stars && <p className="text-xs text-gray-400 mt-2">Tap to rate this stop</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-espresso mb-3">Coffee Left</label>
+                <div className="space-y-2">
+                  {[{k:'wb',label:'Whole Bean'},{k:'gc',label:'Ground Coffee'}].map(({k,label})=>(
+                    <div key={k} className="flex items-center gap-2">
+                      <span className="text-xs text-brown w-24">{label}</span>
+                      <button onClick={()=>upd(k,Math.max(0,form[k]-1))} className="w-7 h-7 rounded-full bg-sand flex items-center justify-center text-espresso font-bold text-sm hover:bg-sandDark transition-colors">−</button>
+                      <span className="w-6 text-center font-bold text-espresso text-sm">{form[k]}</span>
+                      <button onClick={()=>upd(k,form[k]+1)} className="w-7 h-7 rounded-full bg-caramel flex items-center justify-center text-white font-bold text-sm hover:opacity-90 transition-colors">+</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button onClick={handleSave} disabled={!form.company.trim()}
+            className="w-full py-3 rounded-xl font-semibold text-white transition-all disabled:opacity-40"
+            style={{background:'#C17F3B'}}>
+            {saved ? '✓ Stop Saved!' : 'Save Stop'}
+          </button>
         </div>
 
-        {/* WB vs GC Ratio */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Whole Bean vs Ground Coffee</h3>
-          <div className="flex justify-center mt-2">
-            <SVGDonut data={pieData} colors={['#C17F3B','#6B3D2E']} size={210}/>
+        {/* Today's stops */}
+        <div className="bg-white rounded-xl p-5 self-start" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+          <h3 className="font-semibold text-espresso mb-3">Stops on {selDate}</h3>
+          {stopsForDate.length === 0
+            ? <p className="text-sm text-gray-400">No stops yet for this date.</p>
+            : <div className="space-y-2">
+                {stopsForDate.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 py-1.5 border-b border-sand/60 last:border-0">
+                    <span className="text-xs text-gray-400 w-4">{s.stop}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-espresso truncate">{s.company}</div>
+                    </div>
+                    <StarBadge stars={s.stars}/>
+                  </div>
+                ))}
+              </div>}
+          <div className="mt-4 pt-4 border-t border-sand text-xs text-brown">
+            <div>WB today: <strong>{stopsForDate.reduce((a,s)=>a+s.wb,0)}</strong></div>
+            <div>GC today: <strong>{stopsForDate.reduce((a,s)=>a+s.gc,0)}</strong></div>
           </div>
         </div>
-
-        {/* Grade 3 Trend */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Grade 3 Stops Trend</h3>
-          <SVGLineChart data={g3Trend} valueKey="Grade 3" labelKey="name" maxVal={Math.max(...g3Trend.map(d=>d['Grade 3']||0),1)} height={200} color="#15803D"/>
-        </div>
-
-        {/* By Industry */}
-        <div className="bg-white rounded-xl p-5 shadow-card">
-          <h3 className="font-semibold text-espresso mb-4">Avg Grade by Industry</h3>
-          <SVGHBarChart data={byCat.filter(x=>x.name!=='Invalid')} valueKey="avg" labelKey="name" maxVal={3} height={220} color="#C17F3B"/>
-        </div>
-      </div>
-
-      {/* Industry Breakdown Table */}
-      <div className="bg-white rounded-xl shadow-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-sand"><h3 className="font-semibold text-espresso">Industry Breakdown</h3></div>
-        <table className="w-full text-sm">
-          <thead><tr className="bg-cream text-brown text-xs uppercase tracking-wide">
-            <th className="px-4 py-2 text-left">Industry</th>
-            <th className="px-4 py-2 text-center">Stops</th>
-            <th className="px-4 py-2 text-center">Avg Grade</th>
-            <th className="px-4 py-2 text-center">Grade 3</th>
-            <th className="px-4 py-2 text-center">WB</th>
-            <th className="px-4 py-2 text-center">GC</th>
-          </tr></thead>
-          <tbody>{byCat.filter(x=>x.name!=='Invalid').map((x,i)=>(
-            <tr key={x.name} className={`border-t border-sand ${i%2===0?'bg-white':'bg-cream/30'}`}>
-              <td className="px-4 py-3 font-medium text-espresso">{x.name}</td>
-              <td className="px-4 py-3 text-center text-gray-600">{x.total}</td>
-              <td className="px-4 py-3 text-center"><GradeBadge grade={Math.round(x.avg)}/></td>
-              <td className="px-4 py-3 text-center font-bold" style={{color:'#15803D'}}>{x.g3}</td>
-              <td className="px-4 py-3 text-center text-gray-600">{x.wb}</td>
-              <td className="px-4 py-3 text-center text-gray-600">{x.gc}</td>
-            </tr>
-          ))}</tbody>
-        </table>
       </div>
     </div>
   );
-};
+}
 
-// ============================================================
-// APP SHELL
-// ============================================================
+// ── Beans Page ────────────────────────────────────────────────────────
+function BeansPage({ stops, beans, onSetBeans }) {
+  const fromStopsWB = stops.reduce((a,s)=>a+s.wb,0);
+  const fromStopsGC = stops.reduce((a,s)=>a+s.gc,0);
+  const totalWB = fromStopsWB + beans.wbAdj;
+  const totalGC = fromStopsGC + beans.gcAdj;
+
+  const adj = (key, delta) => onSetBeans(prev => ({ ...prev, [key]: prev[key] + delta }));
+
+  const CounterCard = ({ label, icon, total, fromStops, adjKey, adjVal }) => (
+    <div className="bg-white rounded-2xl p-6" style={{boxShadow:'0 2px 16px rgba(44,24,16,0.08)'}}>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{background:'#FAF6F1'}}>{icon}</div>
+        <div>
+          <div className="font-bold text-espresso">{label}</div>
+          <div className="text-xs text-brown">Bags given out</div>
+        </div>
+      </div>
+      <div className="text-center my-6">
+        <div className="text-7xl font-black" style={{color:'#C17F3B'}}>{total}</div>
+        <div className="text-sm text-gray-400 mt-2">total bags</div>
+      </div>
+      <div className="flex items-center justify-center gap-4 mb-6">
+        <button onClick={()=>adj(adjKey, -1)} className="w-12 h-12 rounded-full text-2xl font-bold flex items-center justify-center transition-all" style={{background:'#F0E6D3',color:'#6B3D2E'}}>−</button>
+        <div className="text-center">
+          <div className="text-xs text-gray-400">Manual adjust</div>
+          <div className="font-bold text-espresso">{adjVal >= 0 ? `+${adjVal}` : adjVal}</div>
+        </div>
+        <button onClick={()=>adj(adjKey, +1)} className="w-12 h-12 rounded-full text-2xl font-bold flex items-center justify-center transition-all text-white" style={{background:'#C17F3B'}}>+</button>
+      </div>
+      <div className="bg-cream rounded-xl p-3 text-xs text-brown space-y-1">
+        <div className="flex justify-between"><span>From stop logs</span><span className="font-semibold">{fromStops} bags</span></div>
+        <div className="flex justify-between"><span>Manual adjustment</span><span className="font-semibold">{adjVal >= 0 ? `+${adjVal}` : adjVal}</span></div>
+        <div className="flex justify-between border-t border-sandDark pt-1 mt-1 font-bold text-espresso"><span>Total given</span><span>{total}</span></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 fade-in">
+      <div>
+        <h1 className="text-2xl font-bold text-espresso">Bean Tracker</h1>
+        <p className="text-brown text-sm mt-1">Your running count of coffee samples given out. Adjust manually anytime.</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <CounterCard label="Whole Bean" icon="☕" total={totalWB} fromStops={fromStopsWB} adjKey="wbAdj" adjVal={beans.wbAdj}/>
+        <CounterCard label="Ground Coffee" icon="🫘" total={totalGC} fromStops={fromStopsGC} adjKey="gcAdj" adjVal={beans.gcAdj}/>
+      </div>
+
+      <div className="bg-white rounded-xl p-5" style={{boxShadow:'0 1px 4px rgba(44,24,16,0.06)'}}>
+        <h3 className="font-semibold text-espresso mb-4">Bags Given by Route Day</h3>
+        <div className="space-y-2">
+          {[...new Set(stops.map(s=>s.date))].sort().reverse().map(date => {
+            const dayStops = stops.filter(s => s.date === date);
+            const wb = dayStops.reduce((a,s)=>a+s.wb,0);
+            const gc = dayStops.reduce((a,s)=>a+s.gc,0);
+            if (!wb && !gc) return null;
+            return (
+              <div key={date} className="flex items-center gap-3 py-2 border-b border-sand/60 last:border-0">
+                <div className="text-sm font-medium text-espresso w-28">{date}</div>
+                <div className="flex gap-3 text-xs">
+                  {wb>0 && <span className="px-2 py-0.5 rounded-full font-semibold" style={{background:'#FFF7ED',color:'#C2410C'}}>☕ {wb} WB</span>}
+                  {gc>0 && <span className="px-2 py-0.5 rounded-full font-semibold" style={{background:'#F0FDF4',color:'#15803D'}}>🫘 {gc} GC</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────
 const NAV = [
-  {id:'overview',  icon:'◉', label:'Overview'},
-  {id:'routes',    icon:'🗺', label:'Routes'},
-  {id:'entry',     icon:'✏️', label:'Daily Entry'},
-  {id:'followups', icon:'📞', label:'Follow-Ups'},
-  {id:'analytics', icon:'📈', label:'Analytics'},
+  { id:'overview', label:'Overview', icon:'📊' },
+  { id:'map',      label:'Map',      icon:'📍' },
+  { id:'log',      label:'Stop Log', icon:'📋' },
+  { id:'add',      label:'Add Stop', icon:'➕' },
+  { id:'beans',    label:'Beans',    icon:'🫘' },
 ];
-
-function loadLS(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch(e) { return fallback; }
-}
-function saveLS(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
-}
 
 function App() {
   const [page, setPage] = useState('overview');
-  const [stops, setStops] = useState(() => loadLS('plexus_stops', INIT_STOPS));
-  const [routes, setRoutes] = useState(() => loadLS('plexus_routes', INIT_ROUTES));
+  const [stops, setStops] = useState(() => loadLS('plexus_stops_v2', INIT_STOPS));
+  const [routes, setRoutes] = useState(() => loadLS('plexus_routes_v2', INIT_ROUTES));
+  const [beans, setBeans] = useState(() => loadLS('plexus_beans', { wbAdj:0, gcAdj:0 }));
   const [sideOpen, setSideOpen] = useState(true);
 
-  // Persist to localStorage whenever data changes
-  useEffect(() => { saveLS('plexus_stops', stops); }, [stops]);
-  useEffect(() => { saveLS('plexus_routes', routes); }, [routes]);
+  useEffect(() => { saveLS('plexus_stops_v2', stops); }, [stops]);
+  useEffect(() => { saveLS('plexus_routes_v2', routes); }, [routes]);
+  useEffect(() => { saveLS('plexus_beans', beans); }, [beans]);
 
-  const handleEditStop = useCallback((updated) => {
-    setStops(prev => prev.map(s => s.id === updated.id ? updated : s));
-  },[]);
-  const handleDeleteStop = useCallback((id) => {
-    if(confirm('Delete this stop?')) setStops(prev => prev.filter(s=>s.id!==id));
-  },[]);
-  const handleAddStop = useCallback((stop, isEdit=false) => {
-    setStops(prev => isEdit ? prev.map(s=>s.id===stop.id?stop:s) : [...prev,stop]);
-  },[]);
-  const handleAddRoute = useCallback((route) => {
-    setRoutes(prev => [...prev, route]);
-  },[]);
+  const handleAddStop  = useCallback(s => setStops(p => [...p, s]), []);
+  const handleAddRoute = useCallback(r => setRoutes(p => [...p, r]), []);
+  const handleDelete   = useCallback(id => setStops(p => p.filter(s => s.id !== id)), []);
 
-  const fuCount = stops.filter(s=>s.follow_up&&s.fu_status==='not_started').length;
-  const g3Unactioned = stops.filter(s=>s.grade===3&&s.follow_up&&s.fu_status==='not_started').length;
+  const totalWB = stops.reduce((a,s)=>a+s.wb,0) + beans.wbAdj;
+  const totalGC = stops.reduce((a,s)=>a+s.gc,0) + beans.gcAdj;
 
   return (
     <div className="flex min-h-screen" style={{background:'#FAF6F1',fontFamily:"'Inter',sans-serif"}}>
       {/* Sidebar */}
-      <aside className={`${sideOpen?'w-56':'w-14'} flex-shrink-0 flex flex-col transition-all duration-200`}
+      <aside className={`${sideOpen?'w-52':'w-14'} flex-shrink-0 flex flex-col transition-all duration-200`}
         style={{background:'#2C1810',minHeight:'100vh'}}>
-        {/* Logo */}
         <div className={`flex items-center gap-3 px-4 py-5 border-b border-white/10 ${!sideOpen&&'justify-center'}`}>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-lg flex-shrink-0" style={{background:'#C17F3B'}}>☕</div>
-          {sideOpen && <div>
-            <div className="text-white font-bold text-sm leading-tight">Plexus</div>
-            <div className="text-white/50 text-xs">Coffee Routes</div>
-          </div>}
+          {sideOpen && <div><div className="text-white font-bold text-sm leading-tight">Coffee Tracker</div><div className="text-white/40 text-xs">Plexus Technology</div></div>}
         </div>
-        {/* Nav */}
-        <nav className="flex-1 py-4 px-2 space-y-1">
-          {NAV.map(n=>(
+        <nav className="flex-1 py-3">
+          {NAV.map(n => (
             <button key={n.id} onClick={()=>setPage(n.id)}
-              className={`nav-item w-full flex items-center gap-3 px-2 py-2.5 rounded-lg text-sm transition-colors ${page===n.id?'nav-active':'text-white/60 hover:text-white/90'}`}>
-              <span className="text-base w-6 text-center flex-shrink-0">{n.icon}</span>
-              {sideOpen && <span className="font-medium">{n.label}</span>}
-              {sideOpen && n.id==='followups' && fuCount>0 && (
-                <span className="ml-auto text-xs rounded-full px-1.5 py-0.5 font-bold" style={{background:'#C17F3B',color:'#fff'}}>{fuCount}</span>
-              )}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all ${page===n.id?'text-white':'text-white/50 hover:text-white/80 hover:bg-white/5'} ${!sideOpen&&'justify-center'}`}
+              style={page===n.id?{background:'rgba(193,127,59,0.25)',borderLeft:'3px solid #C17F3B'}:{borderLeft:'3px solid transparent'}}>
+              <span className="text-base flex-shrink-0">{n.icon}</span>
+              {sideOpen && n.label}
             </button>
           ))}
         </nav>
-        {/* Reset + Toggle */}
         <div className="mt-auto">
           {sideOpen && (
-            <button onClick={()=>{if(confirm('Reset all data to original demo data?')){saveLS('plexus_stops',INIT_STOPS);saveLS('plexus_routes',INIT_ROUTES);setStops(INIT_STOPS);setRoutes(INIT_ROUTES);}}}
+            <button onClick={()=>{if(confirm('Reset all data to original demo data?')){saveLS('plexus_stops_v2',INIT_STOPS);saveLS('plexus_routes_v2',INIT_ROUTES);saveLS('plexus_beans',{wbAdj:0,gcAdj:0});setStops(INIT_STOPS);setRoutes(INIT_ROUTES);setBeans({wbAdj:0,gcAdj:0});}}}
               className="w-full px-4 py-2 text-xs text-white/30 hover:text-white/60 hover:bg-white/5 text-left transition-colors border-t border-white/10">
               ↺ Reset to demo data
             </button>
           )}
-          <button onClick={()=>setSideOpen(p=>!p)} className="w-full p-2 text-white/40 hover:text-white/70 hover:bg-white/5 text-xs text-center">
-            {sideOpen?'◀ Collapse':'▶'}
+          <button onClick={()=>setSideOpen(p=>!p)} className="w-full p-2 text-white/40 hover:text-white/70 text-xs text-center transition-colors">
+            {sideOpen?'◀':'▶'}
           </button>
         </div>
       </aside>
 
       {/* Main */}
       <main className="flex-1 overflow-auto">
-        {/* Top bar */}
-        <div className="sticky top-0 z-10 bg-cream/90 backdrop-blur border-b border-sand px-6 py-3 flex items-center justify-between">
-          <div className="text-sm text-brown font-medium">
-            {NAV.find(n=>n.id===page)?.label}
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            {g3Unactioned>0 && (
-              <button onClick={()=>setPage('followups')} className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{background:'#DCFCE7',color:'#15803D'}}>
-                🚨 {g3Unactioned} hot lead{g3Unactioned>1?'s':''} need follow-up
-              </button>
-            )}
-            <span className="text-xs text-gray-400 flex items-center gap-1">
-              <span style={{display:'inline-block',width:6,height:6,borderRadius:'50%',background:'#15803D'}}></span>
-              Live · {stops.length} stops · {routes.length} routes
-            </span>
+        <div className="sticky top-0 z-10 bg-cream/90 backdrop-blur border-b border-sand px-6 py-3 flex items-center justify-between" style={{backdropFilter:'blur(8px)'}}>
+          <div className="text-sm font-medium text-brown">{NAV.find(n=>n.id===page)?.label}</div>
+          <div className="flex items-center gap-4 text-xs text-gray-400">
+            <span>☕ {totalWB} WB</span>
+            <span>🫘 {totalGC} GC</span>
+            <span className="flex items-center gap-1"><span style={{display:'inline-block',width:6,height:6,borderRadius:'50%',background:'#15803D'}}></span>Saved · {stops.length} stops</span>
             <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{background:'#C17F3B'}}>CW</div>
           </div>
         </div>
-
-        {/* Page Content */}
         <div className="p-6 max-w-6xl mx-auto">
-          {page==='overview'  && <OverviewPage  stops={stops} routes={routes}/>}
-          {page==='routes'    && <RoutesPage    stops={stops} routes={routes} onEditStop={handleEditStop} onDeleteStop={handleDeleteStop}/>}
-          {page==='entry'     && <DailyEntryPage routes={routes} stops={stops} onAddRoute={handleAddRoute} onAddStop={handleAddStop}/>}
-          {page==='followups' && <FollowUpsPage stops={stops} onEditStop={handleEditStop}/>}
-          {page==='analytics' && <AnalyticsPage stops={stops} routes={routes}/>}
+          {page==='overview' && <OverviewPage stops={stops} routes={routes} beans={beans}/>}
+          {page==='map'      && <MapPage stops={stops}/>}
+          {page==='log'      && <LogPage stops={stops} routes={routes} onDelete={handleDelete}/>}
+          {page==='add'      && <AddStopPage stops={stops} routes={routes} onAddStop={handleAddStop} onAddRoute={handleAddRoute}/>}
+          {page==='beans'    && <BeansPage stops={stops} beans={beans} onSetBeans={setBeans}/>}
         </div>
       </main>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
