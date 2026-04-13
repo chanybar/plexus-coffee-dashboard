@@ -1,0 +1,1 @@
+Updated dashboard requirements:\n- New stop logs should appear on map\n- Satellite map view\n- Daily stop log filtering\n- Simplified KPI overview\n- Removed avg rating focus\n\nSecurity note: rotate previously exposed GitHub token immediately.
