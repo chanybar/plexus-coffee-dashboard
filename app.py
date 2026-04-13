@@ -4,10 +4,11 @@ import json
 import folium
 from streamlit_folium import st_folium
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import date
 import uuid
-from io import StringIO
 
+# ── Page config ───────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Plexus Coffee Tracker",
     page_icon="☕",
@@ -15,673 +16,415 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ── Load seed data ────────────────────────────────────────────────────
 @st.cache_data
 def load_seed():
     with open("data.json") as f:
         return json.load(f)
 
-def init_state():
-    if "stops" not in st.session_state:
-        seed = load_seed()
-        st.session_state.stops = seed["stops"]
-        st.session_state.routes = seed["routes"]
-        st.session_state.wb_adj = seed["beans"]["wb_adj"]
-        st.session_state.gc_adj = seed["beans"]["gc_adj"]
-    if "route_uploads" not in st.session_state:
-        st.session_state.route_uploads = []
-    if "route_upload_counter" not in st.session_state:
-        st.session_state.route_upload_counter = 0
+# ── Session state init ────────────────────────────────────────────────
+if "stops" not in st.session_state:
+    seed = load_seed()
+    st.session_state.stops   = seed["stops"]
+    st.session_state.routes  = seed["routes"]
+    st.session_state.wb_adj  = seed["beans"]["wb_adj"]
+    st.session_state.gc_adj  = seed["beans"]["gc_adj"]
 
-init_state()
-
-STAR_COLOR = {3: "#2F6B4F", 2: "#B87333", 1: "#8B5E3C", 0: "#B6AAA0"}
+# ── Helpers ───────────────────────────────────────────────────────────
+STAR_COLOR = {3: "#15803D", 2: "#C2410C", 1: "#B45309", 0: "#9CA3AF"}
+STAR_BG    = {3: "#DCFCE7", 2: "#FFF7ED", 1: "#FEF3C7", 0: "#F3F4F6"}
 STAR_LABEL = {3: "⭐⭐⭐", 2: "⭐⭐", 1: "⭐", 0: "—"}
-CATEGORIES = ["Law", "Architecture", "Construction", "Biotech", "Finance", "Healthcare", "Real Estate", "Other"]
+CATEGORIES = ["Law", "Architecture", "Construction", "Biotech", "Finance",
+              "Healthcare", "Real Estate", "Other"]
 
 def stops_df():
-    df = pd.DataFrame(st.session_state.stops)
-    if df.empty:
-        return pd.DataFrame(columns=["id","route_id","date","stop","company","cat","lat","lng","stars","wb","gc","notes","address","contact","source_upload_id","route_status"])
-    for col in ["address", "contact", "source_upload_id", "route_status"]:
-        if col not in df.columns:
-            df[col] = ""
-    return df
-
-def route_uploads_df():
-    df = pd.DataFrame(st.session_state.route_uploads)
-    if df.empty:
-        return pd.DataFrame(columns=["upload_id","date","company","address","cat","contact","notes","status"])
-    return df
+    return pd.DataFrame(st.session_state.stops)
 
 def total_wb():
-    return int(sum(s.get("wb", 0) for s in st.session_state.stops) + st.session_state.wb_adj)
+    return sum(s["wb"] for s in st.session_state.stops) + st.session_state.wb_adj
 
 def total_gc():
-    return int(sum(s.get("gc", 0) for s in st.session_state.stops) + st.session_state.gc_adj)
+    return sum(s["gc"] for s in st.session_state.stops) + st.session_state.gc_adj
 
-def total_bags():
-    return total_wb() + total_gc()
-
-def get_route_name(route_id, route_date):
-    route = next((r for r in st.session_state.routes if r["id"] == route_id), None)
-    if route:
-        return route["name"]
-    fallback = next((r for r in st.session_state.routes if r["date"] == route_date), None)
-    return fallback["name"] if fallback else f"Route {route_date}"
-
-def ensure_route_for_date(date_str, preferred_name=None):
-    existing = next((r for r in st.session_state.routes if r["date"] == date_str), None)
-    if existing:
-        return existing["id"]
-    new_id = f"r-{uuid.uuid4().hex[:8]}"
-    st.session_state.routes.append({
-        "id": new_id,
-        "date": date_str,
-        "name": preferred_name or f"Route {date_str}"
-    })
-    return new_id
-
-def status_chip(value):
-    mapping = {
-        "Pending": "#F7E7CE",
-        "In Route": "#E8DCCB",
-        "Completed": "#DDEEDF"
-    }
-    return mapping.get(value, "#F3EEE8")
-
-st.markdown("""
-<style>
-:root{
-  --bg:#f5efe6;
-  --paper:#fbf7f2;
-  --card:#f8f1e7;
-  --ink:#2d2218;
-  --muted:#7a6858;
-  --line:#e8dccd;
-  --accent:#6f4e37;
-  --accent-2:#b87333;
-  --green:#2f6b4f;
-}
-.stApp{
-  background: linear-gradient(180deg, #f6efe6 0%, #f3ebdf 100%);
-  color: var(--ink);
-}
-section[data-testid="stSidebar"]{
-  background: #efe5d8;
-  border-right: 1px solid var(--line);
-}
-h1,h2,h3{
-  color: var(--ink);
-  letter-spacing:-0.02em;
-}
-.block-container{
-  padding-top: 2rem;
-  padding-bottom: 3rem;
-}
-.hero{
-  background: linear-gradient(120deg, rgba(111,78,55,0.96) 0%, rgba(184,115,51,0.94) 100%);
-  color: #fffaf5;
-  padding: 1.6rem 1.8rem;
-  border-radius: 22px;
-  box-shadow: 0 12px 40px rgba(111,78,55,0.16);
-  margin-bottom: 1rem;
-}
-.hero h1{
-  color:#fffaf5 !important;
-  margin:0;
-  font-size:2.2rem;
-}
-.hero p{
-  margin:0.45rem 0 0 0;
-  color:#f7ebdd;
-  font-size:1rem;
-}
-.kpi-card{
-  background: rgba(251,247,242,0.96);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 1rem 1.05rem;
-  box-shadow: 0 10px 25px rgba(77,49,28,0.06);
-}
-.kpi-label{
-  color: var(--muted);
-  font-size: 0.86rem;
-  margin-bottom: 0.2rem;
-}
-.kpi-value{
-  color: var(--ink);
-  font-size: 1.8rem;
-  font-weight: 700;
-}
-.section-card{
-  background: rgba(251,247,242,0.97);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 1rem 1rem 0.65rem 1rem;
-  box-shadow: 0 10px 25px rgba(77,49,28,0.05);
-  margin-bottom: 1rem;
-}
-.small-note{
-  color: var(--muted);
-  font-size: 0.92rem;
-}
-.route-pill{
-  display:inline-block;
-  background:#efe2d3;
-  color:#5a4330;
-  border:1px solid #e1d2c0;
-  border-radius:999px;
-  padding:0.28rem 0.6rem;
-  font-size:0.82rem;
-  margin-right:0.45rem;
-  margin-top:0.25rem;
-}
-div[data-testid="stMetricValue"]{
-  color: var(--ink);
-}
-div[data-testid="stMetricLabel"]{
-  color: var(--muted);
-}
-</style>
-""", unsafe_allow_html=True)
-
+# ── Sidebar ───────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ☕ Plexus Coffee Tracker")
-    st.caption("Adonai-inspired field dashboard")
+    st.image("https://img.icons8.com/emoji/96/hot-beverage.png", width=52)
+    st.markdown("## Coffee Tracker\n**Plexus Technology**")
+    st.divider()
+
     page = st.radio(
         "Navigate",
-        ["📊 Overview", "🗺️ Map", "📋 Stop Log", "➕ Add Stop", "📝 Route Plans", "🫘 Bean Tracker"],
+        ["📊 Overview", "📍 Map", "📋 Stop Log", "➕ Add Stop", "🫘 Bean Tracker"],
         label_visibility="collapsed"
     )
-    st.divider()
-    st.markdown(f"**Stops:** {len(st.session_state.stops)}")
-    st.markdown(f"**Whole Bean:** {total_wb()}")
-    st.markdown(f"**Ground:** {total_gc()}")
-    st.markdown(f"**Bags Given:** {total_bags()}")
 
+    st.divider()
+    st.markdown(f"**☕ {total_wb()} WB &nbsp; 🫘 {total_gc()} GC**")
+    st.caption(f"{len(st.session_state.stops)} stops · {len(st.session_state.routes)} routes")
+
+    st.divider()
+    # Export
     export_data = {
-        "stops": st.session_state.stops,
+        "stops":  st.session_state.stops,
         "routes": st.session_state.routes,
-        "beans": {"wb_adj": st.session_state.wb_adj, "gc_adj": st.session_state.gc_adj},
-        "route_uploads": st.session_state.route_uploads
+        "beans":  {"wb_adj": st.session_state.wb_adj, "gc_adj": st.session_state.gc_adj}
     }
     st.download_button(
-        "⬇ Export Dashboard Data",
+        "⬇ Export data (JSON)",
         data=json.dumps(export_data, indent=2),
         file_name="coffee_tracker_data.json",
         mime="application/json",
         use_container_width=True
     )
 
-    uploaded = st.file_uploader("⬆ Import Dashboard Data", type="json", label_visibility="collapsed")
+    # Import
+    uploaded = st.file_uploader("⬆ Import data (JSON)", type="json", label_visibility="collapsed")
     if uploaded:
         data = json.load(uploaded)
-        st.session_state.stops = data.get("stops", [])
-        st.session_state.routes = data.get("routes", [])
-        beans = data.get("beans", {})
-        st.session_state.wb_adj = beans.get("wb_adj", 0)
-        st.session_state.gc_adj = beans.get("gc_adj", 0)
-        st.session_state.route_uploads = data.get("route_uploads", [])
-        st.success("Dashboard data imported.")
+        st.session_state.stops  = data["stops"]
+        st.session_state.routes = data["routes"]
+        st.session_state.wb_adj = data["beans"]["wb_adj"]
+        st.session_state.gc_adj = data["beans"]["gc_adj"]
+        st.success("Data imported!")
         st.rerun()
 
-df = stops_df()
-
+# ══════════════════════════════════════════════════════════════════════
+# PAGE: OVERVIEW
+# ══════════════════════════════════════════════════════════════════════
 if page == "📊 Overview":
-    st.markdown("""
-    <div class="hero">
-      <h1>Plexus Coffee Overview</h1>
-      <p>Brew hope, track outreach, and keep your daily route performance clean, visual, and easy to share.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("Good morning, Chandler ☕")
+    df = stops_df()
 
-    star_3 = int((df["stars"] == 3).sum()) if not df.empty else 0
-    star_2 = int((df["stars"] == 2).sum()) if not df.empty else 0
-    star_1 = int((df["stars"] == 1).sum()) if not df.empty else 0
+    rated = df[df["stars"] > 0]
+    avg   = rated["stars"].mean() if len(rated) else 0
 
-    k1, k2, k3, k4 = st.columns(4)
-    for col, label, value in [
-        (k1, "Total Stops", len(df)),
-        (k2, "Total Bags Given", total_bags()),
-        (k3, "Whole Bean", total_wb()),
-        (k4, "Ground Coffee", total_gc()),
-    ]:
-        with col:
-            st.markdown(f'<div class="kpi-card"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div></div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Stops",       len(df))
+    c2.metric("⭐⭐⭐ 3-Star Stops", len(df[df["stars"] == 3]))
+    c3.metric("☕ Whole Bean Given", total_wb(), help="From stops + manual adjustment")
+    c4.metric("🫘 Ground Coffee Given", total_gc(), help="From stops + manual adjustment")
 
-    k5, k6, k7, k8 = st.columns(4)
-    for col, label, value in [
-        (k5, "3-Star Stops", star_3),
-        (k6, "2-Star Stops", star_2),
-        (k7, "1-Star Stops", star_1),
-        (k8, "Route Days", len(st.session_state.routes)),
-    ]:
-        with col:
-            st.markdown(f'<div class="kpi-card"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div></div>', unsafe_allow_html=True)
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("⭐⭐ 2-Star Stops", len(df[df["stars"] == 2]))
+    c6.metric("⭐ 1-Star Stops",  len(df[df["stars"] == 1]))
+    c7.metric("Avg Rating",       f"{avg:.2f} / 3.0")
+    c8.metric("Route Days",       len(st.session_state.routes))
 
-    st.write("")
-    c1, c2 = st.columns(2)
+    st.divider()
 
-    with c1:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    col_l, col_r = st.columns(2)
+
+    # Star distribution bar chart
+    with col_l:
         st.subheader("Star Distribution")
-        star_data = pd.DataFrame({
-            "Rating": ["1 Star", "2 Stars", "3 Stars"],
-            "Count": [star_1, star_2, star_3]
-        })
-        fig = px.bar(
-            star_data, x="Rating", y="Count", text="Count",
-            color="Rating",
-            color_discrete_map={"1 Star": "#8B5E3C", "2 Stars": "#B87333", "3 Stars": "#2F6B4F"}
-        )
+        star_data = pd.DataFrame([
+            {"Rating": "⭐ 1 Star",   "Count": len(df[df["stars"] == 1]), "color": "#B45309"},
+            {"Rating": "⭐⭐ 2 Stars", "Count": len(df[df["stars"] == 2]), "color": "#C2410C"},
+            {"Rating": "⭐⭐⭐ 3 Stars","Count": len(df[df["stars"] == 3]), "color": "#15803D"},
+        ])
+        fig = px.bar(star_data, x="Rating", y="Count", color="Rating",
+                     color_discrete_map={
+                         "⭐ 1 Star": "#B45309",
+                         "⭐⭐ 2 Stars": "#C2410C",
+                         "⭐⭐⭐ 3 Stars": "#15803D"
+                     }, text="Count")
         fig.update_traces(textposition="outside")
-        fig.update_layout(
-            showlegend=False, height=320,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            yaxis=dict(gridcolor="#eadfce"),
-            margin=dict(l=10, r=10, t=10, b=10)
-        )
+        fig.update_layout(showlegend=False, height=320,
+                          plot_bgcolor="rgba(0,0,0,0)",
+                          paper_bgcolor="rgba(0,0,0,0)",
+                          yaxis=dict(showgrid=True, gridcolor="#F0E6D3"))
         st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with c2:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Bags Given by Route Day")
-        if not df.empty:
-            day_counts = df.groupby("date", as_index=False).agg(
-                whole_bean=("wb", "sum"),
-                ground=("gc", "sum")
-            ).sort_values("date")
-            day_counts["total"] = day_counts["whole_bean"] + day_counts["ground"]
-            fig2 = px.line(
-                day_counts, x="date", y="total", markers=True,
-                color_discrete_sequence=["#6f4e37"]
-            )
-            fig2.update_layout(
-                height=320, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(gridcolor="#eadfce"),
-                margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="Date", yaxis_title="Bags"
-            )
+    # Avg rating by route day
+    with col_r:
+        st.subheader("Avg Rating by Route Day")
+        trend = []
+        for r in st.session_state.routes:
+            rs = [s for s in st.session_state.stops if s["route_id"] == r["id"] and s["stars"] > 0]
+            if rs:
+                trend.append({"Date": r["date"][5:], "Avg": round(sum(s["stars"] for s in rs) / len(rs), 2)})
+        if trend:
+            tdf = pd.DataFrame(trend)
+            fig2 = px.line(tdf, x="Date", y="Avg", markers=True,
+                           color_discrete_sequence=["#C17F3B"])
+            fig2.update_traces(line_width=2.5, marker_size=8)
+            fig2.update_layout(height=320, yaxis=dict(range=[0, 3.2], gridcolor="#F0E6D3"),
+                               plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig2, use_container_width=True)
-        else:
-            st.info("No stops logged yet.")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    c3, c4 = st.columns([1.15, 1])
+    # Industry breakdown
+    st.subheader("Avg Rating by Industry")
+    if len(rated):
+        by_cat = rated.groupby("cat").agg(
+            Stops=("stars", "count"),
+            Avg=("stars", "mean"),
+            Stars3=("stars", lambda x: (x == 3).sum())
+        ).reset_index().sort_values("Avg", ascending=False)
+        by_cat["Avg"] = by_cat["Avg"].round(2)
+        by_cat.columns = ["Industry", "Stops", "Avg Rating", "3-Star Stops"]
+        st.dataframe(by_cat, use_container_width=True, hide_index=True)
 
-    with c3:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Recent Stops")
-        recent = df.sort_values(["date", "stop"], ascending=[False, True]).tail(8) if not df.empty else pd.DataFrame()
-        recent = recent.sort_values(["date", "stop"], ascending=[False, True])
-        if not recent.empty:
-            for _, s in recent.iterrows():
-                route_name = get_route_name(s["route_id"], s["date"])
-                st.markdown(
-                    f"**{s['company']}** · {STAR_LABEL.get(int(s['stars']), '—')}  \n"
-                    f"<span class='small-note'>{s['date']} · {route_name} · {s['cat']}</span>  \n"
-                    f"<span class='small-note'>{s.get('notes', '') or 'No notes added.'}</span>",
-                    unsafe_allow_html=True
-                )
-                st.divider()
-        else:
-            st.info("No recent stops yet.")
-        st.markdown('</div>', unsafe_allow_html=True)
+    # Recent stops
+    st.subheader("Recent Stops")
+    recent = sorted(st.session_state.stops, key=lambda x: x["date"], reverse=True)[:8]
+    for s in recent:
+        col_a, col_b, col_c = st.columns([3, 1, 4])
+        col_a.markdown(f"**{s['company']}**  \n<small>{s['date']} · {s['cat']}</small>",
+                       unsafe_allow_html=True)
+        col_b.markdown(STAR_LABEL.get(s["stars"], "—"))
+        col_c.markdown(f"<small>{s['notes']}</small>", unsafe_allow_html=True)
 
-    with c4:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Industry Breakdown")
-        if not df.empty:
-            industry = df.groupby("cat", as_index=False).agg(
-                stops=("company", "count"),
-                star_3=("stars", lambda x: int((x == 3).sum())),
-                whole_bean=("wb", "sum"),
-                ground=("gc", "sum")
-            ).sort_values("stops", ascending=False)
-            industry["bags"] = industry["whole_bean"] + industry["ground"]
-            st.dataframe(
-                industry.rename(columns={
-                    "cat": "Industry",
-                    "stops": "Stops",
-                    "star_3": "3-Star",
-                    "bags": "Bags"
-                })[["Industry", "Stops", "3-Star", "Bags"]],
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.info("Industry analytics will appear here as you log stops.")
-        st.markdown('</div>', unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════════════
+# PAGE: MAP
+# ══════════════════════════════════════════════════════════════════════
+elif page == "📍 Map":
+    st.title("Route Map")
+    df = stops_df()
+    mapped = df[df["lat"].notna() & df["lng"].notna()]
+    st.caption(f"{len(mapped)} stops plotted across the Phoenix metro")
 
-elif page == "🗺️ Map":
-    st.markdown("""
-    <div class="hero">
-      <h1>Route Map</h1>
-      <p>Street view keeps the route practical. Only stops with map coordinates are plotted, but every stop can still be logged.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Filters
+    fc1, fc2 = st.columns(2)
+    star_filter = fc1.multiselect("Filter by stars", [3, 2, 1],
+                                  default=[3, 2, 1],
+                                  format_func=lambda x: STAR_LABEL[x])
+    cat_filter  = fc2.multiselect("Filter by industry", sorted(df["cat"].unique()),
+                                  default=list(df["cat"].unique()))
 
-    mapped = df[df["lat"].notna() & df["lng"].notna()].copy() if not df.empty else pd.DataFrame()
-    route_choices = ["All Days"] + sorted(df["date"].dropna().unique().tolist(), reverse=True) if not df.empty else ["All Days"]
-    mc1, mc2, mc3 = st.columns([1.1, 1, 1])
-    selected_day = mc1.selectbox("View route day", route_choices)
-    star_filter = mc2.multiselect("Filter stars", [3, 2, 1], default=[3, 2, 1], format_func=lambda x: STAR_LABEL[x])
-    cats = sorted(df["cat"].dropna().unique().tolist()) if not df.empty else []
-    cat_filter = mc3.multiselect("Filter industry", cats, default=cats)
+    filtered = mapped[mapped["stars"].isin(star_filter) & mapped["cat"].isin(cat_filter)]
 
-    if not mapped.empty:
-        if selected_day != "All Days":
-            mapped = mapped[mapped["date"] == selected_day]
-        if cat_filter:
-            mapped = mapped[mapped["cat"].isin(cat_filter)]
-        mapped = mapped[mapped["stars"].isin(star_filter)]
+    # Build map
+    m = folium.Map(location=[33.480, -111.980], zoom_start=11,
+                   tiles="CartoDB positron")
 
-        m = folium.Map(location=[33.480, -111.980], zoom_start=11, tiles="CartoDB positron")
-        for _, s in mapped.iterrows():
-            route_name = get_route_name(s["route_id"], s["date"])
-            popup_html = f"""
-            <div style='font-family:Inter,sans-serif;min-width:220px'>
-              <b style='font-size:14px'>{s['company']}</b><br>
-              <span style='font-size:12px;color:#6f4e37'>{s['date']} · {route_name}</span><br>
-              <span style='font-size:13px'>{s['cat']} · {STAR_LABEL.get(int(s['stars']), '—')}</span><br>
-              <small>WB: {int(s['wb'])} · GC: {int(s['gc'])}</small><br>
-              <small>{s.get('notes', '') or 'No notes added.'}</small>
-            </div>
-            """
-            folium.CircleMarker(
-                location=[float(s["lat"]), float(s["lng"])],
-                radius=10,
-                color="white",
-                weight=2.5,
-                fill=True,
-                fill_color=STAR_COLOR.get(int(s["stars"]), "#B6AAA0"),
-                fill_opacity=0.92,
-                popup=folium.Popup(popup_html, max_width=260),
-                tooltip=s["company"]
-            ).add_to(m)
-        st_folium(m, width=None, height=620, returned_objects=[])
-        missing_count = len(df) - len(df[df["lat"].notna() & df["lng"].notna()]) if not df.empty else 0
-        st.caption(f"{len(mapped)} plotted stops shown. {missing_count} logged stops do not have map coordinates yet, but they still stay in the dashboard.")
-    else:
-        st.info("No mapped stops yet. You can still use Add Stop and Route Plans without coordinates.")
+    for _, s in filtered.iterrows():
+        col   = STAR_COLOR.get(int(s["stars"]), "#9CA3AF")
+        stars = STAR_LABEL.get(int(s["stars"]), "—")
+        popup_html = f"""
+        <div style='font-family:sans-serif;min-width:200px'>
+          <b style='font-size:14px'>{s['company']}</b><br>
+          <span style='color:#6B3D2E;font-size:12px'>{s['date']} · {s['cat']}</span><br>
+          <span style='font-size:18px'>{stars}</span><br>
+          {'<br><small>' + str(s['notes']) + '</small>' if s['notes'] else ''}
+          <br><small>WB: {int(s['wb'])} &nbsp; GC: {int(s['gc'])}</small>
+        </div>"""
+        folium.CircleMarker(
+            location=[s["lat"], s["lng"]],
+            radius=11,
+            color="white", weight=2.5,
+            fill=True, fill_color=col, fill_opacity=0.9,
+            popup=folium.Popup(popup_html, max_width=240),
+            tooltip=s["company"]
+        ).add_to(m)
 
+    st_folium(m, width=None, height=600, returned_objects=[])
+
+    # Legend
+    lc1, lc2, lc3 = st.columns(3)
+    lc1.markdown("🟢 **3 Stars** — Highly engaged")
+    lc2.markdown("🟠 **2 Stars** — Good visit")
+    lc3.markdown("🟡 **1 Star** — Low engagement")
+
+# ══════════════════════════════════════════════════════════════════════
+# PAGE: STOP LOG
+# ══════════════════════════════════════════════════════════════════════
 elif page == "📋 Stop Log":
-    st.markdown("""
-    <div class="hero">
-      <h1>Stop Log</h1>
-      <p>Clean daily tracking with route names, notes, coffee counts, and better date alignment.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("Stop Log")
+    df = stops_df()
 
-    if df.empty:
-        st.info("No stops logged yet.")
-    else:
-        sc1, sc2, sc3, sc4 = st.columns([1.15, 1, 1, 1.2])
-        all_dates = sorted(df["date"].dropna().unique().tolist(), reverse=True)
-        selected_day = sc1.selectbox("Filter by day", ["All Days"] + all_dates)
-        selected_star = sc2.selectbox("Stars", ["All", "3", "2", "1"])
-        selected_cat = sc3.selectbox("Industry", ["All"] + sorted(df["cat"].dropna().unique().tolist()))
-        search = sc4.text_input("Search", placeholder="Company or notes")
+    sc1, sc2, sc3 = st.columns(3)
+    search      = sc1.text_input("Search", placeholder="Company name, notes...")
+    star_filter = sc2.selectbox("Stars", ["All", "⭐⭐⭐ 3 Stars", "⭐⭐ 2 Stars", "⭐ 1 Star"])
+    cat_filter  = sc3.selectbox("Industry", ["All"] + sorted(df["cat"].unique().tolist()))
 
-        filtered = df.copy()
-        if selected_day != "All Days":
-            filtered = filtered[filtered["date"] == selected_day]
-        if selected_star != "All":
-            filtered = filtered[filtered["stars"] == int(selected_star)]
-        if selected_cat != "All":
-            filtered = filtered[filtered["cat"] == selected_cat]
-        if search:
-            filtered = filtered[
-                filtered["company"].str.contains(search, case=False, na=False) |
-                filtered["notes"].str.contains(search, case=False, na=False) |
-                filtered["address"].str.contains(search, case=False, na=False)
-            ]
+    filtered = df.copy()
+    if search:
+        mask = (filtered["company"].str.contains(search, case=False, na=False) |
+                filtered["notes"].str.contains(search, case=False, na=False))
+        filtered = filtered[mask]
+    if star_filter != "All":
+        n = int(star_filter[0])
+        filtered = filtered[filtered["stars"] == n]
+    if cat_filter != "All":
+        filtered = filtered[filtered["cat"] == cat_filter]
 
-        filtered = filtered.sort_values(["date", "stop"], ascending=[False, True])
-        st.caption(f"{len(filtered)} stops shown")
+    filtered = filtered.sort_values("date", ascending=False)
+    st.caption(f"{len(filtered)} stops")
 
-        for dt in filtered["date"].drop_duplicates():
-            day_df = filtered[filtered["date"] == dt].copy()
-            route_names = sorted(set(day_df.apply(lambda x: get_route_name(x["route_id"], x["date"]), axis=1).tolist()))
-            with st.expander(f"{dt} · {len(day_df)} stops", expanded=(selected_day != "All Days")):
-                if route_names:
-                    st.markdown("".join([f"<span class='route-pill'>{name}</span>" for name in route_names]), unsafe_allow_html=True)
-                display = day_df[["stop", "company", "cat", "stars", "wb", "gc", "address", "notes"]].copy()
-                display["stars"] = display["stars"].map(lambda x: STAR_LABEL.get(int(x), "—"))
-                display.columns = ["Stop #", "Company", "Industry", "Rating", "WB", "GC", "Address", "Notes"]
-                st.dataframe(display, use_container_width=True, hide_index=True)
+    # Display grouped by date
+    for dt in filtered["date"].unique():
+        day_df = filtered[filtered["date"] == dt].sort_values("stop")
+        route  = next((r for r in st.session_state.routes if r["date"] == dt), None)
+        label  = f"**{dt}**" + (f"  —  {route['name']}" if route else "")
 
+        with st.expander(f"{dt}  ·  {route['name'] if route else ''}  ·  {len(day_df)} stops"):
+            for _, s in day_df.iterrows():
+                c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 3])
+                c1.markdown(f"**{s['company']}**  \n<small>{s['cat']}</small>",
+                            unsafe_allow_html=True)
+                c2.markdown(STAR_LABEL.get(int(s["stars"]), "—"))
+                c3.markdown(f"☕ {int(s['wb'])}" if s["wb"] else "—")
+                c4.markdown(f"🫘 {int(s['gc'])}" if s["gc"] else "—")
+                c5.markdown(f"<small>{s['notes']}</small>", unsafe_allow_html=True)
+
+    # Full table toggle
+    if st.checkbox("Show full table"):
+        display = filtered[["date", "company", "cat", "stars", "wb", "gc", "notes"]].copy()
+        display.columns = ["Date", "Company", "Industry", "Stars", "WB", "GC", "Notes"]
+        st.dataframe(display, use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════════════════════════════
+# PAGE: ADD STOP
+# ══════════════════════════════════════════════════════════════════════
 elif page == "➕ Add Stop":
-    st.markdown("""
-    <div class="hero">
-      <h1>Log a Stop</h1>
-      <p>Add a stop fast. Address is optional for mapping, not required for saving.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("Log a Stop")
 
-    uploads_df = route_uploads_df()
-    col_form, col_today = st.columns([1.45, 1])
+    col_form, col_today = st.columns([2, 1])
 
     with col_form:
         with st.form("add_stop_form", clear_on_submit=True):
-            ad1, ad2 = st.columns(2)
-            route_date = ad1.date_input("Date", value=date.today())
-            date_str = route_date.strftime("%Y-%m-%d")
-            existing_route = next((r for r in st.session_state.routes if r["date"] == date_str), None)
-            route_name_input = ad2.text_input("Route name", value=existing_route["name"] if existing_route else "")
+            st.subheader("Stop Details")
 
-            pending_for_day = uploads_df[(uploads_df["date"] == date_str) & (uploads_df["status"] != "Completed")] if not uploads_df.empty else pd.DataFrame()
-            planned_label_map = {"Manual entry": None}
-            if not pending_for_day.empty:
-                for _, row in pending_for_day.iterrows():
-                    label = f"{row['company']} · {row.get('address', '')}"
-                    planned_label_map[label] = row["upload_id"]
-            planned_choice = st.selectbox("Planned stop", list(planned_label_map.keys()))
+            route_date = st.date_input("Date", value=date.today())
+            date_str   = route_date.strftime("%Y-%m-%d")
 
-            selected_plan = None
-            if planned_label_map[planned_choice] is not None:
-                selected_plan = pending_for_day[pending_for_day["upload_id"] == planned_label_map[planned_choice]].iloc[0]
-
-            company = st.text_input("Company Name *", value="" if selected_plan is None else str(selected_plan.get("company", "")))
-            cat_default = CATEGORIES.index(selected_plan["cat"]) if selected_plan is not None and selected_plan.get("cat") in CATEGORIES else 0
-            cat = st.selectbox("Industry", CATEGORIES, index=cat_default)
-            address = st.text_input("Address", value="" if selected_plan is None else str(selected_plan.get("address", "")))
-            contact = st.text_input("Contact Name", value="" if selected_plan is None else str(selected_plan.get("contact", "")))
-
-            rt1, rt2, rt3 = st.columns(3)
-            stars = rt1.radio("Rating", [1, 2, 3], format_func=lambda x: STAR_LABEL[x], horizontal=True)
-            wb = rt2.number_input("Whole Bean", min_value=0, max_value=20, value=0, step=1)
-            gc = rt3.number_input("Ground Coffee", min_value=0, max_value=20, value=0, step=1)
-
-            route_status = st.selectbox("Route Status", ["Completed", "In Route", "Pending"], index=0)
-            notes = st.text_area("Notes", value="" if selected_plan is None else str(selected_plan.get("notes", "")))
-            submit = st.form_submit_button("✅ Save Stop", use_container_width=True)
-
-        if submit:
-            if not company.strip():
-                st.warning("Company name is required.")
+            existing_route = next(
+                (r for r in st.session_state.routes if r["date"] == date_str), None
+            )
+            if existing_route:
+                st.info(f"Adding to: **{existing_route['name']}**")
             else:
-                route_id = ensure_route_for_date(date_str, route_name_input.strip() or None)
-                stops_today = [s for s in st.session_state.stops if s["date"] == date_str]
-                new_stop = {
-                    "id": f"s-{uuid.uuid4().hex[:8]}",
-                    "route_id": route_id,
-                    "date": date_str,
-                    "stop": len(stops_today) + 1,
-                    "company": company.strip(),
-                    "cat": cat,
-                    "lat": None,
-                    "lng": None,
-                    "stars": int(stars),
-                    "wb": int(wb),
-                    "gc": int(gc),
-                    "notes": notes.strip(),
-                    "address": address.strip(),
-                    "contact": contact.strip(),
-                    "route_status": route_status,
-                    "source_upload_id": "" if selected_plan is None else str(selected_plan["upload_id"])
-                }
-                st.session_state.stops.append(new_stop)
+                new_route_name = st.text_input("Route name (new)", placeholder="e.g. Phoenix Law Week 4")
 
-                if selected_plan is not None:
-                    for item in st.session_state.route_uploads:
-                        if item["upload_id"] == str(selected_plan["upload_id"]):
-                            item["status"] = "Completed" if route_status == "Completed" else route_status
+            company = st.text_input("Company Name *")
+            cat     = st.selectbox("Industry", CATEGORIES)
+            address = st.text_input("Address", placeholder="1234 N Central Ave, Phoenix AZ")
+            contact = st.text_input("Contact Name")
 
-                st.success(f"Saved {company.strip()} to {date_str}.")
-                st.rerun()
+            st.subheader("Rating")
+            stars = st.radio("Star Rating", [1, 2, 3],
+                             format_func=lambda x: STAR_LABEL[x],
+                             horizontal=True)
+
+            st.subheader("Coffee Left")
+            wc1, wc2 = st.columns(2)
+            wb = wc1.number_input("Whole Bean bags", min_value=0, max_value=20, value=0, step=1)
+            gc = wc2.number_input("Ground Coffee bags", min_value=0, max_value=20, value=0, step=1)
+
+            notes   = st.text_area("Notes", placeholder="What happened? Any key details...")
+            submit  = st.form_submit_button("✅ Save Stop", use_container_width=True)
+
+        if submit and company:
+            route_id = existing_route["id"] if existing_route else f"r-{uuid.uuid4().hex[:8]}"
+            if not existing_route:
+                name = new_route_name if new_route_name else f"Route {date_str}"
+                st.session_state.routes.append({"id": route_id, "date": date_str, "name": name})
+
+            stops_today = [s for s in st.session_state.stops if s["date"] == date_str]
+            st.session_state.stops.append({
+                "id":       f"s-{uuid.uuid4().hex[:8]}",
+                "route_id": route_id,
+                "date":     date_str,
+                "stop":     len(stops_today) + 1,
+                "company":  company,
+                "cat":      cat,
+                "lat":      None,
+                "lng":      None,
+                "stars":    stars,
+                "wb":       wb,
+                "gc":       gc,
+                "notes":    notes
+            })
+            st.success(f"✅ Saved: **{company}** — {STAR_LABEL[stars]}")
+            st.rerun()
+        elif submit:
+            st.warning("Company name is required.")
 
     with col_today:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Stops for selected day")
-        today_df = df[df["date"] == date_str].sort_values("stop") if not df.empty else pd.DataFrame()
-        if not today_df.empty:
-            for _, s in today_df.iterrows():
-                st.markdown(
-                    f"**{int(s['stop'])}. {s['company']}**  \n"
-                    f"<span class='small-note'>{STAR_LABEL.get(int(s['stars']), '—')} · WB {int(s['wb'])} · GC {int(s['gc'])}</span>",
-                    unsafe_allow_html=True
-                )
-                st.divider()
-            st.markdown(f"**WB total:** {int(today_df['wb'].sum())}")
-            st.markdown(f"**GC total:** {int(today_df['gc'].sum())}")
+        date_str_today = date.today().strftime("%Y-%m-%d")
+        today_stops = [s for s in st.session_state.stops if s["date"] == date_str_today]
+        st.subheader(f"Today ({date_str_today})")
+        if not today_stops:
+            st.caption("No stops logged yet today.")
         else:
-            st.caption("No stops saved yet for this day.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            for s in today_stops:
+                st.markdown(f"**{s['stop']}.** {s['company']}  \n{STAR_LABEL.get(s['stars'], '—')}")
+            st.divider()
+            st.markdown(f"**WB today:** {sum(s['wb'] for s in today_stops)}")
+            st.markdown(f"**GC today:** {sum(s['gc'] for s in today_stops)}")
 
-elif page == "📝 Route Plans":
-    st.markdown("""
-    <div class="hero">
-      <h1>Route Plans</h1>
-      <p>Your marketing lady can upload the day's route list here. You can track each stop as pending, in route, or completed.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("Upload route list")
-    st.caption("Use CSV with columns like: date, company, address, cat, contact, notes")
-    upload = st.file_uploader("Upload route CSV", type=["csv"], key="route_csv_upload")
-    if upload is not None:
-        try:
-            text = StringIO(upload.getvalue().decode("utf-8"))
-            incoming = pd.read_csv(text)
-            incoming.columns = [str(c).strip().lower() for c in incoming.columns]
-            required = {"date", "company"}
-            if not required.issubset(set(incoming.columns)):
-                st.error("CSV needs at least 'date' and 'company' columns.")
-            else:
-                normalized = incoming.copy()
-                for col in ["address", "cat", "contact", "notes"]:
-                    if col not in normalized.columns:
-                        normalized[col] = ""
-                if "cat" in normalized.columns:
-                    normalized["cat"] = normalized["cat"].apply(lambda x: x if x in CATEGORIES else "Other")
-                normalized["date"] = pd.to_datetime(normalized["date"]).dt.strftime("%Y-%m-%d")
-                if st.button("Add uploaded route list", type="primary", use_container_width=True):
-                    added = 0
-                    for _, row in normalized.iterrows():
-                        st.session_state.route_upload_counter += 1
-                        st.session_state.route_uploads.append({
-                            "upload_id": f"u-{st.session_state.route_upload_counter}",
-                            "date": row["date"],
-                            "company": str(row.get("company", "")).strip(),
-                            "address": str(row.get("address", "")).strip(),
-                            "cat": str(row.get("cat", "Other")).strip() or "Other",
-                            "contact": str(row.get("contact", "")).strip(),
-                            "notes": str(row.get("notes", "")).strip(),
-                            "status": "Pending"
-                        })
-                        ensure_route_for_date(row["date"])
-                        added += 1
-                    st.success(f"Added {added} planned stops.")
-                    st.rerun()
-                st.dataframe(normalized, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.error(f"Could not read CSV: {e}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    uploads_df = route_uploads_df()
-    if uploads_df.empty:
-        st.info("No route plans uploaded yet.")
-    else:
-        rp1, rp2 = st.columns([1.15, 1])
-        dates = sorted(uploads_df["date"].dropna().unique().tolist(), reverse=True)
-        selected_date = rp1.selectbox("Route date", ["All Days"] + dates)
-        selected_status = rp2.selectbox("Status", ["All", "Pending", "In Route", "Completed"])
-
-        plans = uploads_df.copy()
-        if selected_date != "All Days":
-            plans = plans[plans["date"] == selected_date]
-        if selected_status != "All":
-            plans = plans[plans["status"] == selected_status]
-        plans = plans.sort_values(["date", "company"], ascending=[False, True])
-
-        for dt in plans["date"].drop_duplicates():
-            day_df = plans[plans["date"] == dt].copy()
-            with st.expander(f"{dt} · {len(day_df)} planned stops", expanded=(selected_date != 'All Days')):
-                for _, row in day_df.iterrows():
-                    rc1, rc2, rc3 = st.columns([2.2, 1.05, 0.95])
-                    rc1.markdown(
-                        f"**{row['company']}**  \n"
-                        f"<span class='small-note'>{row.get('address', '')}</span>  \n"
-                        f"<span class='small-note'>{row.get('cat', 'Other')} · {row.get('contact', '')}</span>",
-                        unsafe_allow_html=True
-                    )
-                    new_status = rc2.selectbox(
-                        "Status",
-                        ["Pending", "In Route", "Completed"],
-                        index=["Pending", "In Route", "Completed"].index(row["status"]),
-                        key=f"status_{row['upload_id']}"
-                    )
-                    if new_status != row["status"]:
-                        for item in st.session_state.route_uploads:
-                            if item["upload_id"] == row["upload_id"]:
-                                item["status"] = new_status
-                        st.rerun()
-                    rc3.markdown(
-                        f"<div style='margin-top:1.9rem;background:{status_chip(row['status'])};padding:0.4rem 0.65rem;border-radius:999px;text-align:center;border:1px solid #e4d6c8'>{row['status']}</div>",
-                        unsafe_allow_html=True
-                    )
-
+# ══════════════════════════════════════════════════════════════════════
+# PAGE: BEAN TRACKER
+# ══════════════════════════════════════════════════════════════════════
 elif page == "🫘 Bean Tracker":
-    st.markdown("""
-    <div class="hero">
-      <h1>Bean Tracker</h1>
-      <p>Quick running totals for whole bean and ground coffee, with manual adjustments when needed.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("Bean Tracker")
+    st.caption("Your running count of coffee samples given out. Adjust manually anytime.")
 
-    from_stops_wb = int(sum(s.get("wb", 0) for s in st.session_state.stops))
-    from_stops_gc = int(sum(s.get("gc", 0) for s in st.session_state.stops))
-    b1, b2 = st.columns(2)
+    from_stops_wb = sum(s["wb"] for s in st.session_state.stops)
+    from_stops_gc = sum(s["gc"] for s in st.session_state.stops)
 
-    with b1:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Whole Bean")
-        st.metric("Total Given", total_wb())
-        p1, p2 = st.columns(2)
-        if p1.button("➕ Add 1", use_container_width=True):
+    col1, col2 = st.columns(2)
+
+    # Whole Bean
+    with col1:
+        st.subheader("☕ Whole Bean")
+        st.metric("Total Given", total_wb(), help="From stop logs + manual adjustment")
+
+        bc1, bc2, bc3 = st.columns([1, 1, 1])
+        if bc1.button("➕ Add 1", key="wb_plus", use_container_width=True):
             st.session_state.wb_adj += 1
             st.rerun()
-        if p2.button("➖ Remove 1", use_container_width=True):
+        bc2.markdown(f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>{st.session_state.wb_adj:+d}</div>", unsafe_allow_html=True)
+        if bc3.button("➖ Remove 1", key="wb_minus", use_container_width=True):
             st.session_state.wb_adj -= 1
             st.rerun()
-        st.caption(f"From stop logs: {from_stops_wb}")
-        st.caption(f"Manual adjustment: {st.session_state.wb_adj:+d}")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with b2:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Ground Coffee")
-        st.metric("Total Given", total_gc())
-        p3, p4 = st.columns(2)
-        if p3.button("➕ Add 1", use_container_width=True):
+        st.divider()
+        st.caption(f"From stop logs: **{from_stops_wb}** bags")
+        st.caption(f"Manual adjustment: **{st.session_state.wb_adj:+d}**")
+        st.caption(f"**Total: {total_wb()} bags**")
+
+    # Ground Coffee
+    with col2:
+        st.subheader("🫘 Ground Coffee")
+        st.metric("Total Given", total_gc(), help="From stop logs + manual adjustment")
+
+        gc1, gc2, gc3 = st.columns([1, 1, 1])
+        if gc1.button("➕ Add 1", key="gc_plus", use_container_width=True):
             st.session_state.gc_adj += 1
             st.rerun()
-        if p4.button("➖ Remove 1", use_container_width=True):
+        gc2.markdown(f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>{st.session_state.gc_adj:+d}</div>", unsafe_allow_html=True)
+        if gc3.button("➖ Remove 1", key="gc_minus", use_container_width=True):
             st.session_state.gc_adj -= 1
             st.rerun()
-        st.caption(f"From stop logs: {from_stops_gc}")
-        st.caption(f"Manual adjustment: {st.session_state.gc_adj:+d}")
-        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.caption(f"From stop logs: **{from_stops_gc}** bags")
+        st.caption(f"Manual adjustment: **{st.session_state.gc_adj:+d}**")
+        st.caption(f"**Total: {total_gc()} bags**")
+
+    # By route day
+    st.divider()
+    st.subheader("Bags Given by Route Day")
+    rows = []
+    for dt in sorted(set(s["date"] for s in st.session_state.stops), reverse=True):
+        day = [s for s in st.session_state.stops if s["date"] == dt]
+        wb  = sum(s["wb"] for s in day)
+        gc  = sum(s["gc"] for s in day)
+        if wb or gc:
+            rows.append({"Date": dt, "Whole Bean ☕": wb, "Ground Coffee 🫘": gc, "Total": wb + gc})
+    if rows:
+        rdf = pd.DataFrame(rows)
+        st.dataframe(rdf, use_container_width=True, hide_index=True)
+
+        fig = px.bar(rdf, x="Date", y=["Whole Bean ☕", "Ground Coffee 🫘"],
+                     barmode="group",
+                     color_discrete_map={"Whole Bean ☕": "#C17F3B", "Ground Coffee 🫘": "#6B3D2E"})
+        fig.update_layout(height=300, plot_bgcolor="rgba(0,0,0,0)",
+                          paper_bgcolor="rgba(0,0,0,0)",
+                          yaxis=dict(gridcolor="#F0E6D3"), legend_title="")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Save reminder
+    st.divider()
+    st.info("💾 **To save your data permanently:** use the **Export data** button in the sidebar, then upload that JSON file back anytime to restore your counts.")
