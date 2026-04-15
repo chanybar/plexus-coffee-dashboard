@@ -59,7 +59,7 @@ def _has_ai_key():
     except Exception:
         return False
 
-def parse_note_ai(text: str) -> dict | None:
+def parse_note_ai(text):
     """Use Claude Haiku to extract structured data from a free-form note."""
     try:
         import anthropic
@@ -111,9 +111,9 @@ Rules:
         return None
 
 
-def parse_note_simple(text: str) -> dict:
+def parse_note_simple(text):
     """Keyword/regex fallback parser — no API key required."""
-    result: dict = {}
+    result = {}
     t = text.lower()
     today = date.today()
 
@@ -169,7 +169,7 @@ def parse_note_simple(text: str) -> dict:
     return result
 
 
-def parse_note(text: str) -> tuple[dict, str]:
+def parse_note(text):
     """Returns (parsed_dict, source_label)."""
     if _has_ai_key():
         parsed = parse_note_ai(text)
@@ -557,12 +557,13 @@ elif page == "🗒️ Quick Notes":
         p      = pp["parsed"]
 
         st.subheader(f"Here's what I understood  {source}")
-        st.markdown(
-            f"<div style='background:#F0E6D3;border-radius:10px;padding:14px 18px;"
-            f"font-style:italic;color:#5a3e2b;margin-bottom:12px'>"
-            f""{pp['raw']}"</div>",
-            unsafe_allow_html=True
+        _raw_escaped = pp['raw'].replace('<', '&lt;').replace('>', '&gt;')
+        _note_html = (
+            "<div style='background:#F0E6D3;border-radius:10px;padding:14px 18px;"
+            "font-style:italic;color:#5a3e2b;margin-bottom:12px'>"
+            f"&ldquo;{_raw_escaped}&rdquo;</div>"
         )
+        st.markdown(_note_html, unsafe_allow_html=True)
 
         with st.form("confirm_note_form"):
             nc1, nc2 = st.columns(2)
@@ -699,11 +700,8 @@ elif page == "🫘 Bean Tracker":
         if bc1.button("➕ Add 1", key="wb_plus", use_container_width=True):
             st.session_state.wb_adj += 1
             st.rerun()
-        bc2.markdown(
-            f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>"
-            f"{st.session_state.wb_adj:+d}</div>",
-            unsafe_allow_html=True
-        )
+        _wb_html = f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>{st.session_state.wb_adj:+d}</div>"
+        bc2.markdown(_wb_html, unsafe_allow_html=True)
         if bc3.button("➖ Remove 1", key="wb_minus", use_container_width=True):
             st.session_state.wb_adj -= 1
             st.rerun()
@@ -721,11 +719,8 @@ elif page == "🫘 Bean Tracker":
         if gc1.button("➕ Add 1", key="gc_plus", use_container_width=True):
             st.session_state.gc_adj += 1
             st.rerun()
-        gc2.markdown(
-            f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>"
-            f"{st.session_state.gc_adj:+d}</div>",
-            unsafe_allow_html=True
-        )
+        _gc_html = f"<div style='text-align:center;padding-top:8px;font-size:20px;font-weight:700'>{st.session_state.gc_adj:+d}</div>"
+        gc2.markdown(_gc_html, unsafe_allow_html=True)
         if gc3.button("➖ Remove 1", key="gc_minus", use_container_width=True):
             st.session_state.gc_adj -= 1
             st.rerun()
