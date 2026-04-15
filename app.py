@@ -49,7 +49,14 @@ def total_wb():
     return sum(s["wb"] for s in st.session_state.stops) + st.session_state.wb_adj
 
 def total_gc():
-    return sum(s["gc"] for s in st.session_state.stops) + st.session_state.gc_adj
+    # Ground coffee is inferred: every stop gets either WB or GC.
+    # Explicit gc fields override; otherwise gc = stops_without_wb.
+    explicit_gc = sum(s["gc"] for s in st.session_state.stops)
+    explicit_wb = sum(s["wb"] for s in st.session_state.stops)
+    inferred_gc = max(len(st.session_state.stops) - explicit_wb, 0)
+    # Use inferred if explicit gc is suspiciously low (less than inferred)
+    gc_from_stops = inferred_gc if explicit_gc < inferred_gc else explicit_gc
+    return gc_from_stops + st.session_state.gc_adj
 
 # ── Smart Note Parsers ────────────────────────────────────────────────
 
